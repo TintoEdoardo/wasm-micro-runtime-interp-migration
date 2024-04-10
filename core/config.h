@@ -66,6 +66,10 @@
 #define WASM_ENABLE_INTERP 0
 #endif
 
+#ifndef WASM_ENABLE_MIGRATING_INTERP
+#define WASM_ENABLE_MIGRATING_INTERP 1
+#endif
+
 #ifndef WASM_ENABLE_AOT
 #define WASM_ENABLE_AOT 0
 #endif
