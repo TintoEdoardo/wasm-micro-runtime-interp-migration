@@ -697,6 +697,10 @@ functions_instantiate(const WASMModule *module, WASMModuleInstance *module_inst,
         module_inst->import_func_ptrs[i] =
             function->u.func_import->func_ptr_linked;
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+        function->module = module_inst;
+#endif
+
         function++;
     }
 
@@ -3054,6 +3058,22 @@ wasm_lookup_function(const WASMModuleInstance *module_inst, const char *name)
     return NULL;
 }
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+uint32
+wasm_get_function_index(const WASMModuleInstance *module_inst,
+                        const WASMFunctionInstance *func)
+{
+    uint32 index = 0;
+    uint32 number_of_functions = module_inst->module->function_count;
+    WASMFunction **functions = module_inst->module->functions;
+    for(; index < number_of_functions; index++) {
+        if(func->u.func == functions[index])
+            return index;
+    }
+    return index;
+}
+#endif
+
 #if WASM_ENABLE_MULTI_MODULE != 0
 WASMGlobalInstance *
 wasm_lookup_global(const WASMModuleInstance *module_inst, const char *name)
@@ -3228,6 +3248,29 @@ wasm_call_function(WASMExecEnv *exec_env, WASMFunctionInstance *function,
     module_inst->cur_exec_env = exec_env;
 
     interp_call_wasm(module_inst, exec_env, function, argc, argv);
+    return !wasm_copy_exception(module_inst, NULL);
+}
+
+bool
+wasm_resume_function(WASMExecEnv *exec_env,
+                     uint32 argv[])
+{
+    WASMModuleInstance *module_inst =
+        (WASMModuleInstance *)exec_env->module_inst;
+
+#ifndef OS_ENABLE_HW_BOUND_CHECK
+    /* Set thread handle and stack boundary */
+    wasm_exec_env_set_thread_info(exec_env);
+#else
+    /* Set thread info in call_wasm_with_hw_bound_check when
+       hw bound check is enabled */
+#endif
+
+    /* Set exec env, so it can be later retrieved from instance */
+    module_inst->cur_exec_env = exec_env;
+
+    /* TODO Why exec_env should be passed twice? (as arg and in modul_inst) */
+    wasm_interp_resume_wasm(module_inst, argv);
     return !wasm_copy_exception(module_inst, NULL);
 }
 

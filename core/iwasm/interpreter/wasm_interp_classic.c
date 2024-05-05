@@ -1138,6 +1138,88 @@ FREE_FRAME(WASMExecEnv *exec_env, WASMInterpFrame *frame)
     wasm_exec_env_free_wasm_frame(exec_env, frame);
 }
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+static inline WASMInterpFrameCheckpoint *
+ALLOC_FRAME_CHECKPOINT(WASMExecEnv *exec_env,
+                       WASMInterpFrame *cur_frame)
+{
+    WASMInterpFrameCheckpoint *frame_checkpoint;
+    WASMFunctionInstance *cur_func = cur_frame->function;
+    WASMModuleInstance *module = cur_func->module;
+    uint32 function_index = wasm_get_function_index(module,
+                                                    cur_func);
+
+    unsigned all_cell_num =
+        cur_func->param_cell_num > 2 ? cur_func->param_cell_num : 2;
+
+    /* This is a lazy (but sound) decision, we are allocating
+     * as much as a frame_size for each frame checkpoint,
+     * with the latter surely smaller. */
+    unsigned frame_size = wasm_interp_interp_frame_size(all_cell_num);
+
+    frame_checkpoint = wasm_runtime_malloc((uint32)frame_size);
+
+    memset(frame_checkpoint, 0, (uint32)frame_size);
+
+    /* Populate the data section of the checkpoint frame.  */
+    uint8 size = sizeof(WASMInterpFrameCheckpoint);
+    uint8 *next_section = (uint8 *)frame_checkpoint + size;
+
+    /* Copy the module name.  */
+    frame_checkpoint->module_name = (char *)next_section;
+    char *module_name = module->module->name;
+    uint8 module_name_len = strlen(module_name);
+    for(int i = 0; i < module_name_len; i++) {
+        frame_checkpoint->module_name[i] = module_name[i];
+    }
+
+    next_section = (uint8 *)next_section + module_name_len;
+
+    /* Copy locals from the cur_frame.  */
+    frame_checkpoint->lp = (uint32 *)next_section;
+    uint16 *local_offset = cur_func->local_offsets, offset;
+    uint16 local_count = cur_func->local_count;
+    uint32 *lp = cur_frame->lp;
+    for(unsigned i = 0; i < local_count; i++){
+        offset = local_offset[i];
+        frame_checkpoint->lp[offset] = lp[offset];
+    }
+
+    /* Copy the instruction pointer (ip) offset.  */
+    uint8 *ip = cur_frame->ip;
+    uint8 *ip_start = wasm_get_func_code(cur_func);
+    uint8 ip_offset = ip - ip_start;
+    frame_checkpoint->ip_offset = ip_offset;
+
+    /* Copy the operand stack pointer (sp) offset.  */
+    uint8 *sp = cur_frame->sp;
+    uint8 *sp_start = cur_frame->sp_bottom;
+    uint8 sp_offset = sp - sp_start;
+    frame_checkpoint->sp_offset = sp_offset;
+
+    /* Copy the label stack pointer (csp) offset.  */
+    uint8 *csp = cur_frame->csp;
+    uint8 *csp_start = cur_frame->csp_bottom;
+    uint32 csp_offset = csp - csp_start;
+    frame_checkpoint->csp_offset = csp_offset;
+
+    /* Populate prev and next checkpoint frame.  */
+    frame_checkpoint->prev_frame = NULL;
+    frame_checkpoint->next_frame = NULL;
+
+    return frame_checkpoint;
+}
+
+static inline void
+FREE_FRAME_CHECKPOINT(WASMInterpFrameCheckpoint *frame_checkpoint)
+{
+    wasm_runtime_free(frame_checkpoint->module_name);
+    wasm_runtime_free(frame_checkpoint->lp);
+    wasm_runtime_free(frame_checkpoint);
+}
+
+#endif
+
 static void
 wasm_interp_call_func_native(WASMModuleInstance *module_inst,
                              WASMExecEnv *exec_env,
@@ -1169,6 +1251,9 @@ wasm_interp_call_func_native(WASMModuleInstance *module_inst,
                           prev_frame)))
         return;
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    exec_env->native_call_in_stack++;
+#endif
     frame->function = cur_func;
     frame->ip = NULL;
     frame->sp = frame->lp + local_cell_num;
@@ -1252,6 +1337,9 @@ wasm_interp_call_func_native(WASMModuleInstance *module_inst,
 
     FREE_FRAME(exec_env, frame);
     wasm_exec_env_set_cur_frame(exec_env, prev_frame);
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    exec_env->native_call_in_stack--;
+#endif
 }
 
 #if WASM_ENABLE_FAST_JIT != 0
@@ -1471,6 +1559,15 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     uint8 *frame_ref_tmp;
 #endif
     WASMBranchBlock *frame_csp = NULL;
+
+#if WASM_ENABLE_MIGRATING_INTERP != 0 && WASM_ENABLE_FAST_INTERP == 0
+    if(exec_env->has_checkpoint) {
+        frame_ip = prev_frame->ip;
+        frame_sp = prev_frame->sp;
+        frame_csp = prev_frame->csp;
+    }
+#endif
+
     BlockAddr *cache_items;
     uint8 *frame_ip_end = frame_ip + 1;
     uint8 opcode;
@@ -7257,4 +7354,234 @@ wasm_interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
         wasm_exec_env_set_cur_frame(exec_env, prev_frame);
         FREE_FRAME(exec_env, frame);
     }
+}
+
+static void
+wasm_interp_restore_frame(WASMModuleInstance *module_inst,
+                          WASMExecEnv *exec_env,
+                          WASMFunctionInstance *function,
+                          WASMInterpFrameCheckpoint *framec,
+                          WASMInterpFrame *prev_frame)
+{
+    WASMRuntimeFrame *frame = NULL, *prev_frame, *outs_area;
+    RunningMode running_mode =
+        wasm_runtime_get_running_mode((WASMModuleInstanceCommon *)module_inst);
+    /* Allocate sufficient cells for all kinds of return values.  */
+    bool alloc_frame = true;
+
+    if (argc < function->param_cell_num) {
+        char buf[128];
+        snprintf(buf, sizeof(buf),
+                 "invalid argument count %" PRIu32
+                 ", must be no smaller than %u",
+                 argc, function->param_cell_num);
+        wasm_set_exception(module_inst, buf);
+        return;
+    }
+    argc = function->param_cell_num;
+
+    RECORD_STACK_USAGE(exec_env, (uint8 *)&prev_frame);
+
+    if (alloc_frame) {
+        unsigned all_cell_num =
+            function->ret_cell_num > 2 ? function->ret_cell_num : 2;
+        unsigned frame_size;
+
+        prev_frame = wasm_exec_env_get_cur_frame(exec_env);
+        /* This frame won't be used by JITed code, so only allocate interp
+           frame here.  */
+        frame_size = wasm_interp_interp_frame_size(all_cell_num);
+
+        if (!(frame = ALLOC_FRAME(exec_env, frame_size, prev_frame)))
+            return;
+
+        outs_area = wasm_exec_env_wasm_stack_top(exec_env);
+        frame->function = NULL;
+        frame->ip = NULL;
+        /* There is no local variable. */
+        frame->sp = frame->lp + 0;
+
+        if ((uint8 *)(outs_area->lp + function->param_cell_num)
+            > exec_env->wasm_stack.top_boundary) {
+            wasm_set_exception(module_inst, "wasm operand stack overflow");
+            return;
+        }
+
+        if (argc > 0)
+            word_copy(outs_area->lp, argv, argc);
+
+        wasm_exec_env_set_cur_frame(exec_env, frame);
+    }
+
+#if defined(os_writegsbase)
+    {
+        WASMMemoryInstance *memory_inst = wasm_get_default_memory(module_inst);
+        if (memory_inst)
+            /* write base addr of linear memory to GS segment register */
+            os_writegsbase(memory_inst->memory_data);
+    }
+#endif
+
+    if (function->is_import_func) {
+#if WASM_ENABLE_MULTI_MODULE != 0
+        if (function->import_module_inst) {
+            wasm_interp_call_func_import(module_inst, exec_env, function,
+                                         frame);
+        }
+        else
+#endif
+        {
+            /* it is a native function */
+            wasm_interp_call_func_native(module_inst, exec_env, function,
+                                         frame);
+        }
+    }
+    else {
+        if (running_mode == Mode_Interp) {
+            wasm_interp_call_func_bytecode(module_inst, exec_env, function,
+                                           frame);
+        }
+#if WASM_ENABLE_FAST_JIT != 0
+        else if (running_mode == Mode_Fast_JIT) {
+            fast_jit_call_func_bytecode(module_inst, exec_env, function, frame);
+        }
+#endif
+#if WASM_ENABLE_JIT != 0
+        else if (running_mode == Mode_LLVM_JIT) {
+            llvm_jit_call_func_bytecode(module_inst, exec_env, function, argc,
+                                        argv);
+        }
+#endif
+#if WASM_ENABLE_LAZY_JIT != 0 && WASM_ENABLE_FAST_JIT != 0 \
+    && WASM_ENABLE_JIT != 0
+        else if (running_mode == Mode_Multi_Tier_JIT) {
+            /* Tier-up from Fast JIT to LLVM JIT, call llvm jit function
+               if it is compiled, else call fast jit function */
+            uint32 func_idx = (uint32)(function - module_inst->e->functions);
+            if (module_inst->module->func_ptrs_compiled
+                    [func_idx - module_inst->module->import_function_count]) {
+                llvm_jit_call_func_bytecode(module_inst, exec_env, function,
+                                            argc, argv);
+            }
+            else {
+                fast_jit_call_func_bytecode(module_inst, exec_env, function,
+                                            frame);
+            }
+        }
+#endif
+        else {
+            /* There should always be a supported running mode selected */
+            bh_assert(0);
+        }
+
+        (void)wasm_interp_call_func_bytecode;
+#if WASM_ENABLE_FAST_JIT != 0
+        (void)fast_jit_call_func_bytecode;
+#endif
+    }
+
+    /* Output the return value to the caller */
+    if (!wasm_copy_exception(module_inst, NULL)) {
+        if (alloc_frame) {
+            uint32 i;
+            for (i = 0; i < function->ret_cell_num; i++) {
+                argv[i] = *(frame->sp + i - function->ret_cell_num);
+            }
+        }
+    }
+    else {
+#if WASM_ENABLE_DUMP_CALL_STACK != 0
+        if (wasm_interp_create_call_stack(exec_env)) {
+            wasm_interp_dump_call_stack(exec_env, true, NULL, 0);
+        }
+#endif
+    }
+
+    if (alloc_frame) {
+        wasm_exec_env_set_cur_frame(exec_env, prev_frame);
+        FREE_FRAME(exec_env, frame);
+    }
+}
+
+void
+wasm_interp_restore_exec_env(struct WASMExecEnv *exec_env)
+{
+    /* Allocate the frame acquired from the checkpoint.   */
+#if WASM_ENABLE_INTERP != 0
+#if WASM_ENABLE_FAST_INTERP != 0
+    /* This case is not supported yet.  */
+#else
+
+#endif
+#else
+    /* This case is not yet supported.  */
+#endif
+
+}
+
+void
+wasm_interp_resume_wasm(struct WASMModuleInstance *module_inst,
+                        uint32 argv[])
+{
+
+    /* There is no need to pass the exec_env as an argument.  */
+    WASMExecEnv *exec_env = module_inst->cur_exec_env;
+    /* The stack is already populated.  */
+    WASMFunctionInstance *function = exec_env->cur_frame->function;
+    WASMInterpFrame *frame = exec_env->cur_frame,
+                    *prev_frame = frame->prev_frame,
+                    *outs_area;
+
+    RunningMode running_mode =
+        wasm_runtime_get_running_mode((WASMModuleInstanceCommon *)module_inst);
+
+    outs_area = wasm_exec_env_wasm_stack_top(exec_env);
+
+
+    /* This case is not fully supported yet.  */
+    if (function->is_import_func) {
+#if WASM_ENABLE_MULTI_MODULE != 0
+        if (function->import_module_inst) {
+            wasm_interp_call_func_import(module_inst, exec_env, function,
+                                         frame);
+        }
+        else
+#endif
+        {
+            /* it is a native function */
+            wasm_interp_call_func_native(module_inst, exec_env, function,
+                                         frame);
+        }
+    }
+    else {
+        if (running_mode == Mode_Interp) {
+            wasm_interp_call_func_bytecode(module_inst, exec_env, function,
+                                           frame);
+        }
+        else {
+            /* There should always be a supported running mode selected */
+            bh_assert(0);
+        }
+        (void)wasm_interp_call_func_bytecode;
+    }
+
+    /* Output the return value to the caller */
+    if (!wasm_copy_exception(module_inst, NULL)) {
+
+        uint32 i;
+        for (i = 0; i < function->ret_cell_num; i++) {
+            argv[i] = *(frame->sp + i - function->ret_cell_num);
+        }
+    }
+    else {
+#if WASM_ENABLE_DUMP_CALL_STACK != 0
+        if (wasm_interp_create_call_stack(exec_env)) {
+            wasm_interp_dump_call_stack(exec_env, true, NULL, 0);
+        }
+#endif
+    }
+
+    wasm_exec_env_set_cur_frame(exec_env, prev_frame);
+    FREE_FRAME(exec_env, frame);
+
 }

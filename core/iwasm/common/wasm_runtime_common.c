@@ -1592,6 +1592,13 @@ wasm_runtime_create_exec_env(WASMModuleInstanceCommon *module_inst,
 }
 
 void
+wasm_runtime_restore_exec_env(wasm_exec_env_t exec_env,
+                              uint8_t wasm_checkpoint_buf[])
+{
+    wasm_exec_env_restore(exec_env, wasm_checkpoint_buf);
+}
+
+void
 wasm_runtime_destroy_exec_env(WASMExecEnv *exec_env)
 {
     wasm_exec_env_destroy(exec_env);
@@ -2254,6 +2261,36 @@ wasm_runtime_call_wasm(WASMExecEnv *exec_env,
         return false;
     }
 #endif
+
+    return ret;
+}
+
+bool
+wasm_runtime_resume_wasm(WASMExecEnv *exec_env,
+                         uint32 argv[])
+{
+    bool ret = false;
+    uint32 *new_argv = NULL;
+    if (!wasm_runtime_exec_env_check(exec_env)) {
+        LOG_ERROR("Invalid exec env stack info.");
+        return false;
+    }
+
+    new_argv = argv;
+
+#if WASM_ENABLE_INTERP != 0
+    if (exec_env->module_inst->module_type == Wasm_Module_Bytecode)
+        ret = wasm_resume_function(exec_env, new_argv);
+#endif
+#if WASM_ENABLE_AOT != 0
+    /* Not supported yet */
+#endif
+    if (!ret) {
+        if (new_argv != argv) {
+            wasm_runtime_free(new_argv);
+        }
+        return false;
+    }
 
     return ret;
 }

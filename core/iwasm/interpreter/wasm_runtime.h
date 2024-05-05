@@ -234,6 +234,9 @@ struct WASMFunctionInstance {
     /* children execution time */
     uint64 children_exec_time;
 #endif
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    WASMModuleInstance *module;
+#endif
 };
 
 #if WASM_ENABLE_TAGS != 0
@@ -543,6 +546,12 @@ wasm_set_running_mode(WASMModuleInstance *module_inst,
 WASMFunctionInstance *
 wasm_lookup_function(const WASMModuleInstance *module_inst, const char *name);
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+uint32
+wasm_get_function_index(const WASMModuleInstance *module_inst,
+                        const WASMFunctionInstance *func);
+#endif
+
 #if WASM_ENABLE_MULTI_MODULE != 0
 WASMGlobalInstance *
 wasm_lookup_global(const WASMModuleInstance *module_inst, const char *name);
@@ -564,6 +573,10 @@ wasm_lookup_tag(const WASMModuleInstance *module_inst, const char *name,
 bool
 wasm_call_function(WASMExecEnv *exec_env, WASMFunctionInstance *function,
                    unsigned argc, uint32 argv[]);
+
+bool
+wasm_resume_function(WASMExecEnv *exec_env,
+                     uint32 argv[]);
 
 void
 wasm_set_exception(WASMModuleInstance *module, const char *exception);

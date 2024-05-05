@@ -67,6 +67,23 @@ wasm_loader_unload(WASMModule *module);
  * @return true if success, false otherwise
  */
 
+/**
+ * Load a WASM checkpoint from a specified byte buffer.
+ *
+ * @param buf the byte buffer which contains the checkpoint data
+ * @param size the size of the buffer
+ * @param error_buf output of the exception info
+ * @param error_buf_size the size of the exception string
+ *
+ * @return return module loaded, NULL if failed
+ */
+bool
+wasm_loader_load_stack(WASMExecEnv *exec_env, uint8 *buf, uint32 size,
+#if WASM_ENABLE_MULTI_MODULE != 0
+                 bool main_module,
+#endif
+                 const LoadArgs *args, char *error_buf, uint32 error_buf_size);
+
 bool
 wasm_loader_find_block_addr(WASMExecEnv *exec_env, BlockAddr *block_addr_cache,
                             const uint8 *start_addr, const uint8 *code_end_addr,

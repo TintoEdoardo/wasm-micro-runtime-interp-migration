@@ -75,6 +75,31 @@ typedef struct WASMInterpFrame {
 #endif /* end of WASM_ENABLE_FAST_INTERP != 0 */
 } WASMInterpFrame;
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    typedef struct WASMInterpFrameCheckpoint {
+        struct WASMInterpFrameCheckpoint *prev_frame;
+        struct WASMInterpFrameCheckpoint *next_frame;
+
+        /* TODO: how much space is required for the module_name?  */
+        char *module_name;
+        uint32 func_index;
+
+        /**
+         * Frame data, the layout is:
+         *  lp: parameters and local variables
+         *  ip_offset: instruction pointer (as offset)
+         *  sp_offset: operand stack top pointer (as offset)
+         *  csp: wasm label stack pointer (as offset)
+         */
+
+        uint32 *lp;
+        uint32 ip_offset;
+        uint32 sp_offset;
+        uint32 csp_offset;
+        /* struct WASMBranchBlockCheckpoint csp[1]; */
+    } WASMInterpFrameCheckpoint;
+#endif
+
 /**
  * Calculate the size of interpreter area of frame of a function.
  *
@@ -106,6 +131,13 @@ wasm_interp_call_wasm(struct WASMModuleInstance *module_inst,
                       struct WASMExecEnv *exec_env,
                       struct WASMFunctionInstance *function, uint32 argc,
                       uint32 argv[]);
+
+void
+wasm_interp_restore_exec_env(struct WASMExecEnv *exec_env);
+
+void
+wasm_interp_resume_wasm(struct WASMModuleInstance *module_inst,
+                        uint32 argv[]);
 
 #if WASM_ENABLE_GC != 0
 bool

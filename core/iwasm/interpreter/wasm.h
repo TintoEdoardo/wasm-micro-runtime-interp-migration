@@ -1099,6 +1099,13 @@ typedef struct WASMBranchBlock {
 #endif
 } WASMBranchBlock;
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+typedef struct WASMBranchBlockCheckpoint {
+    uint8 *target_addr_offset;
+    uint32 cell_num;
+} WASMBranchBlockCheckpoint;
+#endif
+
 /**
  * Align an unsigned value on a alignment boundary.
  *

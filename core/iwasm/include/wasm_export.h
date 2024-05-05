@@ -700,6 +700,17 @@ wasm_runtime_create_exec_env(wasm_module_inst_t module_inst,
                              uint32_t stack_size);
 
 /**
+ * Restore the execution environment for a WASM module instance
+ * from an in-memory checkpoint.
+ *
+ * @param exec_env the execution environment
+ * @param wasm_checkpoint_buf the environment checkpoint
+ */
+WASM_RUNTIME_API_EXTERN void
+wasm_runtime_restore_exec_env(wasm_exec_env_t exec_env,
+                             uint8_t wasm_checkpoint_buf[]);
+
+/**
  * Destroy the execution environment.
  *
  * @param exec_env the execution environment to destroy
@@ -851,6 +862,53 @@ wasm_runtime_call_wasm_a(wasm_exec_env_t exec_env,
                          wasm_function_inst_t function,
                          uint32_t num_results, wasm_val_t results[],
                          uint32_t num_args, wasm_val_t *args);
+
+/**
+* Resume the execution of the given WASM function of a WASM module
+* instance with provided stack checkpoint.
+*
+* @param exec_env the execution environment to call the function,
+*   which must be created from wasm_create_exec_env()
+* @param wasm_checkpoint_buf the address of the buffer containing
+*   the stack checkpoint
+* @param argc total cell number that the function parameters occupy,
+*   a cell is a slot of the uint32 array argv[], e.g. i32/f32 argument
+*   occupies one cell, i64/f64 argument occupies two cells, note that
+*   it might be different from the parameter number of the function
+* @param argv the arguments. If the function has return value,
+*   the first (or first two in case 64-bit return value) element of
+*   argv stores the return value of the called WASM function after this
+*   function returns.
+*
+* @return true if success, false otherwise and exception will be thrown,
+*   the caller can call wasm_runtime_get_exception to get the exception
+*   info.
+*/
+WASM_RUNTIME_API_EXTERN bool
+wasm_runtime_resume_wasm(wasm_exec_env_t exec_env,
+                         uint32_t argv[]);
+
+/**
+* Resume the execution of the given WASM function of a WASM module
+* instance with provided stack checkpoint and results space.
+*
+* @param exec_env the execution environment to call the function,
+*   which must be created from wasm_create_exec_env()
+* @param wasm_checkpoint_buf the address of the buffer containing
+*   the stack checkpoint
+* @param function the function to call
+* @param num_results the number of results
+* @param results the pre-alloced pointer to get the results
+*
+* @return true if success, false otherwise and exception will be thrown,
+*   the caller can call wasm_runtime_get_exception to get the exception
+*   info.
+*/
+WASM_RUNTIME_API_EXTERN bool
+wasm_runtime_resume_wasm_a(wasm_exec_env_t exec_env,
+                           uint8 *wasm_checkpoint_buf,
+                           wasm_function_inst_t function,
+                           uint32_t num_results, wasm_val_t results[]);
 
 /**
  * Call the given WASM function of a WASM module instance with

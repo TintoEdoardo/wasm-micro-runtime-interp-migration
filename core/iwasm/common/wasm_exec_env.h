@@ -19,6 +19,11 @@ extern "C" {
 struct WASMModuleInstanceCommon;
 struct WASMInterpFrame;
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+struct WASMInterpFrameCheckpoint;
+struct WASMExecEnvCheckpoint;
+#endif
+
 #if WASM_ENABLE_THREAD_MGR != 0
 typedef struct WASMCluster WASMCluster;
 #if WASM_ENABLE_DEBUG_INTERP != 0
@@ -162,7 +167,34 @@ typedef struct WASMExecEnv {
         /* The WASM stack. */
         uint8 bottom[1];
     } wasm_stack_u;
+
+#if WASM_ENABLE_MIGRATING_INTERP
+    /* For a controlled management of the checkpoint space.
+     * All the frame checkpoints will be written within a specific
+     * location, the checkpoint_stack.
+     * Note, this stack is reversed compared to the wasm stack,
+     * hence, the current frame is at the bottom. */
+    struct WASMExecEnvCheckpoint *exec_env_checkpoint;
+
+    /* Track the number of native call within the exec_env.  */
+    uint8 native_call_in_stack;
+#endif
+
 } WASMExecEnv;
+
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+typedef struct WASMExecEnvCheckpoint {
+    struct WASMInterpFrameCheckpoint *outermost_frame;
+
+    /* The size of the stack. */
+    uint32 size;
+    /* The top to of the checkpoint stack which is free. */
+    uint8 *top;
+    /* The bottom of the checkpoint stack. */
+    uint8 *bottom;
+
+} WASMExecEnvCheckpoint;
+#endif
 
 #if WASM_ENABLE_MEMORY_PROFILING != 0
 #define RECORD_STACK_USAGE(e, p)               \
@@ -188,6 +220,10 @@ wasm_exec_env_create(struct WASMModuleInstanceCommon *module_inst,
 
 void
 wasm_exec_env_destroy(WASMExecEnv *exec_env);
+
+WASMExecEnvCheckpoint *
+wasm_exec_env_checkpoint_create(WASMExecEnv *exec_env,
+                                uint32 stack_size);
 
 static inline bool
 wasm_exec_env_is_aux_stack_managed_by_runtime(WASMExecEnv *exec_env)

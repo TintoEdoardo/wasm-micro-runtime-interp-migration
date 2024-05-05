@@ -72,6 +72,23 @@ wasm_exec_env_create_internal(struct WASMModuleInstanceCommon *module_inst,
     exec_env->wasm_stack.top_boundary =
         exec_env->wasm_stack.bottom + stack_size;
     exec_env->wasm_stack.top = exec_env->wasm_stack.bottom;
+/*
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    / In this instance, we allocate a checkpoint stack as large
+     * as the wasm stack. This is inefficient, in fact, a smaller
+     * stack will suffice, but for the time being, it serves it purposes.  /
+    exec_env->checkpoint_stack.bottom =
+        wasm_runtime_malloc((uint32)stack_size);
+
+    memset(exec_env->checkpoint_stack.bottom, 0, (uint32)stack_size);
+
+    exec_env->checkpoint_stack.top = exec_env->checkpoint_stack.bottom;
+    exec_env->checkpoint_stack.top_boundary =
+        exec_env->checkpoint_stack.bottom + stack_size;
+    exec_env->native_call_in_stack = 0;
+    exec_env->has_checkpoint = false;
+#endif
+*/
 
 #if WASM_ENABLE_AOT != 0
     if (module_inst->module_type == Wasm_Module_AoT) {
@@ -213,6 +230,30 @@ wasm_exec_env_destroy(WASMExecEnv *exec_env)
 #endif /* end of WASM_ENABLE_THREAD_MGR */
 
     wasm_exec_env_destroy_internal(exec_env);
+}
+
+WASMExecEnvCheckpoint *
+wasm_exec_env_checkpoint_create(WASMExecEnv *exec_env,
+                                uint32 stack_size)
+{
+    /* Check that no native call are stacked.  */
+    assert(exec_env->native_call_in_stack > 0);
+
+    WASMExecEnvCheckpoint *exec_enc_checkpoint;
+    uint64 total_size = sizeof(WASMExecEnvCheckpoint) + (uint64)stack_size;
+
+    if (total_size >= UINT32_MAX
+        || !(exec_enc_checkpoint = wasm_runtime_malloc((uint32)total_size)))
+        return NULL;
+
+    memset(exec_enc_checkpoint, 0, (uint32)total_size);
+
+    exec_enc_checkpoint->size = stack_size;
+    exec_enc_checkpoint->bottom =
+        (uint8 *)exec_enc_checkpoint + sizeof(WASMExecEnvCheckpoint);
+    exec_enc_checkpoint->top = exec_enc_checkpoint->bottom;
+
+    return exec_enc_checkpoint;
 }
 
 WASMModuleInstanceCommon *
