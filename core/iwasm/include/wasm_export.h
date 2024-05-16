@@ -85,6 +85,7 @@ typedef struct wasm_section_t {
 /* Execution environment, e.g. stack info */
 struct WASMExecEnv;
 typedef struct WASMExecEnv *wasm_exec_env_t;
+typedef struct WASMExecEnvCheckpoint *wasm_exec_env_checkpoint_t;
 
 /* Package Type */
 typedef enum {
@@ -704,11 +705,11 @@ wasm_runtime_create_exec_env(wasm_module_inst_t module_inst,
  * from an in-memory checkpoint.
  *
  * @param exec_env the execution environment
- * @param wasm_checkpoint_buf the environment checkpoint
+ * @param exec_env_checkpoint the environment checkpoint
  */
 WASM_RUNTIME_API_EXTERN void
 wasm_runtime_restore_exec_env(wasm_exec_env_t exec_env,
-                             uint8_t wasm_checkpoint_buf[]);
+                              wasm_exec_env_checkpoint_t exec_env_checkpoint);
 
 /**
  * Destroy the execution environment.

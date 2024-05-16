@@ -648,7 +648,7 @@ wasm_runtime_create_exec_env(WASMModuleInstanceCommon *module_inst,
 /* See wasm_export.h for description */
 WASM_RUNTIME_API_EXTERN void
 wasm_runtime_restore_exec_env(wasm_exec_env_t exec_env,
-                              uint8_t wasm_checkpoint_buf[]);
+                              wasm_exec_env_checkpoint_t exec_env_checkpoint);
 
 /* See wasm_export.h for description */
 WASM_RUNTIME_API_EXTERN void

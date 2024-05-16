@@ -1101,9 +1101,40 @@ typedef struct WASMBranchBlock {
 
 #if WASM_ENABLE_MIGRATING_INTERP != 0
 typedef struct WASMBranchBlockCheckpoint {
-    uint8 *target_addr_offset;
+    /* The internal structure is the following:
+     * - begin_addr_offset : offset of begin_addr from the lower ip
+     * - target_addr_offset : offset of target_addr from the lower ip
+     * - frame_sp_offset : offset of frame_sp from sp_bottom
+     * - cell_num : cell_num  */
+    uint32 begin_addr_offset;
+    uint32 target_addr_offset;
+    uint32 frame_sp_offset;
     uint32 cell_num;
 } WASMBranchBlockCheckpoint;
+
+inline static void
+checkpoint_csp(WASMBranchBlock *csp,
+               WASMBranchBlockCheckpoint *csp_checkpoint,
+               const uint8 *frame_ip_bottom,
+               const uint32 *frame_sp_bottom)
+{
+    csp_checkpoint->begin_addr_offset  = csp->begin_addr - frame_ip_bottom;
+    csp_checkpoint->target_addr_offset = csp->target_addr - frame_ip_bottom;
+    csp_checkpoint->frame_sp_offset = csp->frame_sp - frame_sp_bottom;
+    csp_checkpoint->cell_num = csp->cell_num;
+}
+
+inline static void
+restore_csp(WASMBranchBlock *csp,
+            WASMBranchBlockCheckpoint *csp_checkpoint,
+            uint8 *frame_ip_bottom,
+            uint32 *frame_sp_bottom)
+{
+    csp->begin_addr  = frame_ip_bottom + csp_checkpoint->begin_addr_offset;
+    csp->target_addr = frame_ip_bottom + csp_checkpoint->target_addr_offset;
+    csp->frame_sp = frame_sp_bottom + csp_checkpoint->frame_sp_offset;
+    csp->cell_num = csp_checkpoint->cell_num;
+}
 #endif
 
 /**

@@ -520,6 +520,16 @@ wasm_load_from_sections(WASMSection *section_list, char *error_buf,
 void
 wasm_unload(WASMModule *module);
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+void
+wasm_exec_env_restore_interp(WASMExecEnv *exec_env,
+                             WASMExecEnvCheckpoint *exec_env_checkpoint);
+
+WASMModuleInstance *
+wasm_get_sub_module_inst(const WASMModuleInstance *parent_module_inst,
+                         const WASMModule *sub_module);
+#endif
+
 WASMModuleInstance *
 wasm_instantiate(WASMModule *module, WASMModuleInstance *parent,
                  WASMExecEnv *exec_env_main, uint32 stack_size,

@@ -112,6 +112,24 @@ get_sub_module_inst(const WASMModuleInstance *parent_module_inst,
 }
 #endif
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+/* TODO: REMOVE
+void
+wasm_exec_env_restore_interp(WASMExecEnv *exec_env,
+                             WASMExecEnvCheckpoint *exec_env_checkpoint)
+{
+    wasm_interp_restore_exec_env(exec_env, exec_env_checkpoint);
+}
+ */
+
+WASMModuleInstance *
+wasm_get_sub_module_inst(const WASMModuleInstance *parent_module_inst,
+                         const WASMModule *sub_module)
+{
+    return get_sub_module_inst(parent_module_inst, sub_module);
+}
+#endif
+
 /**
  * Destroy memory instances.
  */

@@ -232,6 +232,7 @@ wasm_exec_env_destroy(WASMExecEnv *exec_env)
     wasm_exec_env_destroy_internal(exec_env);
 }
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
 WASMExecEnvCheckpoint *
 wasm_exec_env_checkpoint_create(WASMExecEnv *exec_env,
                                 uint32 stack_size)
@@ -255,6 +256,26 @@ wasm_exec_env_checkpoint_create(WASMExecEnv *exec_env,
 
     return exec_enc_checkpoint;
 }
+
+void
+wasm_exec_env_restore(WASMExecEnv *exec_env,
+                      WASMExecEnvCheckpoint *exec_env_checkpoint)
+{
+    /* Different actions are required depending on the
+     * running mode. */
+#if WASM_ENABLE_INTERP != 0
+    wasm_exec_env_restore_interp(exec_env, exec_env_checkpoint);
+#endif
+    /* TODO: AOT is not supported yet.  */
+}
+
+void
+wasm_exec_env_checkpoint_destroy(WASMExecEnvCheckpoint *exec_env_checkpoint)
+{
+    /* The internal checkpoint frame should be already destroyed.  */
+    wasm_runtime_free(exec_env_checkpoint);
+}
+#endif
 
 WASMModuleInstanceCommon *
 wasm_exec_env_get_module_inst(WASMExecEnv *exec_env)

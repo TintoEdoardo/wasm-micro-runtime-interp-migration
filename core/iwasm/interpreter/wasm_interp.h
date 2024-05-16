@@ -76,28 +76,31 @@ typedef struct WASMInterpFrame {
 } WASMInterpFrame;
 
 #if WASM_ENABLE_MIGRATING_INTERP != 0
-    typedef struct WASMInterpFrameCheckpoint {
-        struct WASMInterpFrameCheckpoint *prev_frame;
-        struct WASMInterpFrameCheckpoint *next_frame;
+typedef struct WASMInterpFrameCheckpoint {
+    struct WASMInterpFrameCheckpoint *prev_frame;
 
-        /* TODO: how much space is required for the module_name?  */
-        char *module_name;
-        uint32 func_index;
+    /* TODO: REMOVE
+    char *module_name;
+     */
+    uint32 func_index;
 
-        /**
-         * Frame data, the layout is:
-         *  lp: parameters and local variables
-         *  ip_offset: instruction pointer (as offset)
-         *  sp_offset: operand stack top pointer (as offset)
-         *  csp: wasm label stack pointer (as offset)
-         */
+    /**
+     * Frame data, the layout is:
+     *  lp: parameters and local variables
+     *  ip_offset: instruction pointer (as offset)
+     *  sp_offset: operand stack top pointer (as offset)
+     *  csp_bottom: base of the checkpointed csp stack
+     *  csp_boundary: top of the checkpointed csp stack
+     *  csp_offset: wasm label stack pointer (as offset)
+     */
 
-        uint32 *lp;
-        uint32 ip_offset;
-        uint32 sp_offset;
-        uint32 csp_offset;
-        /* struct WASMBranchBlockCheckpoint csp[1]; */
-    } WASMInterpFrameCheckpoint;
+    uint32 *lp;
+    uint32 ip_offset;
+    uint32 sp_offset;
+    WASMBranchBlockCheckpoint *csp_bottom;
+    WASMBranchBlockCheckpoint *csp_boundary;
+    uint32 csp_offset;
+} WASMInterpFrameCheckpoint;
 #endif
 
 /**
@@ -132,8 +135,13 @@ wasm_interp_call_wasm(struct WASMModuleInstance *module_inst,
                       struct WASMFunctionInstance *function, uint32 argc,
                       uint32 argv[]);
 
+struct WASMExecEnvCheckpoint *
+wasm_interp_produce_checkpoint(struct WASMExecEnv *exec_env);
+
 void
-wasm_interp_restore_exec_env(struct WASMExecEnv *exec_env);
+wasm_interp_restore_exec_env(struct WASMModuleInstance *module_inst,
+                             struct WASMExecEnv *exec_env,
+                             struct WASMExecEnvCheckpoint *exec_env_checkpoint);
 
 void
 wasm_interp_resume_wasm(struct WASMModuleInstance *module_inst,

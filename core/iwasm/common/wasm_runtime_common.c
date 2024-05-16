@@ -1593,9 +1593,9 @@ wasm_runtime_create_exec_env(WASMModuleInstanceCommon *module_inst,
 
 void
 wasm_runtime_restore_exec_env(wasm_exec_env_t exec_env,
-                              uint8_t wasm_checkpoint_buf[])
+                              wasm_exec_env_checkpoint_t exec_env_checkpoint)
 {
-    wasm_exec_env_restore(exec_env, wasm_checkpoint_buf);
+    wasm_exec_env_restore(exec_env, exec_env_checkpoint);
 }
 
 void

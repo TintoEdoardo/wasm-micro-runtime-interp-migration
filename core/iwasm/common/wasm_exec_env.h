@@ -178,6 +178,9 @@ typedef struct WASMExecEnv {
 
     /* Track the number of native call within the exec_env.  */
     uint8 native_call_in_stack;
+
+    /* Notify when a migration request is issued.  */
+    bool requested_migration;
 #endif
 
 } WASMExecEnv;
@@ -185,6 +188,7 @@ typedef struct WASMExecEnv {
 #if WASM_ENABLE_MIGRATING_INTERP != 0
 typedef struct WASMExecEnvCheckpoint {
     struct WASMInterpFrameCheckpoint *outermost_frame;
+    struct WASMInterpFrameCheckpoint *cur_frame;
 
     /* The size of the stack. */
     uint32 size;
@@ -224,6 +228,13 @@ wasm_exec_env_destroy(WASMExecEnv *exec_env);
 WASMExecEnvCheckpoint *
 wasm_exec_env_checkpoint_create(WASMExecEnv *exec_env,
                                 uint32 stack_size);
+
+void
+wasm_exec_env_restore(WASMExecEnv *exec_env,
+                      WASMExecEnvCheckpoint *exec_env_checkpoint);
+
+void
+wasm_exec_env_checkpoint_destroy(WASMExecEnvCheckpoint *exec_env_checkpoint);
 
 static inline bool
 wasm_exec_env_is_aux_stack_managed_by_runtime(WASMExecEnv *exec_env)
