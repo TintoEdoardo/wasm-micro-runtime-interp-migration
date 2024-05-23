@@ -22,6 +22,13 @@ struct WASMInterpFrame;
 #if WASM_ENABLE_MIGRATING_INTERP != 0
 struct WASMInterpFrameCheckpoint;
 struct WASMExecEnvCheckpoint;
+
+enum ExecEnvState {
+    OPERATIONAL   = 0,
+    CHECKPOINTING = 1,
+    CHECKPOINTED  = 2,
+    RESTORING     = 3
+};
 #endif
 
 #if WASM_ENABLE_THREAD_MGR != 0
@@ -161,15 +168,8 @@ typedef struct WASMExecEnv {
     /* The WASM stack size */
     uint32 wasm_stack_size;
 
-    /* The WASM stack of current thread */
-    union {
-        uint64 __make_it_8_byte_aligned_;
-        /* The WASM stack. */
-        uint8 bottom[1];
-    } wasm_stack_u;
-
-#if WASM_ENABLE_MIGRATING_INTERP
-    /* For a controlled management of the checkpoint space.
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    /* For a controlled management of the src space.
      * All the frame checkpoints will be written within a specific
      * location, the checkpoint_stack.
      * Note, this stack is reversed compared to the wasm stack,
@@ -181,20 +181,29 @@ typedef struct WASMExecEnv {
 
     /* Notify when a migration request is issued.  */
     bool requested_migration;
+
+    /* Track the state of the exec_env.  */
+    enum ExecEnvState state;
 #endif
+
+    /* The WASM stack of current thread */
+    union {
+        uint64 __make_it_8_byte_aligned_;
+        /* The WASM stack. */
+        uint8 bottom[1];
+    } wasm_stack_u;
 
 } WASMExecEnv;
 
 #if WASM_ENABLE_MIGRATING_INTERP != 0
 typedef struct WASMExecEnvCheckpoint {
-    struct WASMInterpFrameCheckpoint *outermost_frame;
     struct WASMInterpFrameCheckpoint *cur_frame;
 
     /* The size of the stack. */
     uint32 size;
-    /* The top to of the checkpoint stack which is free. */
+    /* The top to of the src stack which is free. */
     uint8 *top;
-    /* The bottom of the checkpoint stack. */
+    /* The bottom of the src stack. */
     uint8 *bottom;
 
 } WASMExecEnvCheckpoint;
@@ -225,9 +234,11 @@ wasm_exec_env_create(struct WASMModuleInstanceCommon *module_inst,
 void
 wasm_exec_env_destroy(WASMExecEnv *exec_env);
 
-WASMExecEnvCheckpoint *
+/* TODO: REMOVE
+ WASMExecEnvCheckpoint *
 wasm_exec_env_checkpoint_create(WASMExecEnv *exec_env,
                                 uint32 stack_size);
+
 
 void
 wasm_exec_env_restore(WASMExecEnv *exec_env,
@@ -235,6 +246,7 @@ wasm_exec_env_restore(WASMExecEnv *exec_env,
 
 void
 wasm_exec_env_checkpoint_destroy(WASMExecEnvCheckpoint *exec_env_checkpoint);
+*/
 
 static inline bool
 wasm_exec_env_is_aux_stack_managed_by_runtime(WASMExecEnv *exec_env)

@@ -121,13 +121,14 @@ wasm_exec_env_restore_interp(WASMExecEnv *exec_env,
     wasm_interp_restore_exec_env(exec_env, exec_env_checkpoint);
 }
  */
-
+/* TODO: REMOVE
 WASMModuleInstance *
 wasm_get_sub_module_inst(const WASMModuleInstance *parent_module_inst,
                          const WASMModule *sub_module)
 {
     return get_sub_module_inst(parent_module_inst, sub_module);
 }
+ */
 #endif
 
 /**
@@ -3269,6 +3270,7 @@ wasm_call_function(WASMExecEnv *exec_env, WASMFunctionInstance *function,
     return !wasm_copy_exception(module_inst, NULL);
 }
 
+/* TODO: REMOVE
 bool
 wasm_resume_function(WASMExecEnv *exec_env,
                      uint32 argv[])
@@ -3277,20 +3279,21 @@ wasm_resume_function(WASMExecEnv *exec_env,
         (WASMModuleInstance *)exec_env->module_inst;
 
 #ifndef OS_ENABLE_HW_BOUND_CHECK
-    /* Set thread handle and stack boundary */
+    / * Set thread handle and stack boundary * /
     wasm_exec_env_set_thread_info(exec_env);
 #else
-    /* Set thread info in call_wasm_with_hw_bound_check when
-       hw bound check is enabled */
+    / * Set thread info in call_wasm_with_hw_bound_check when
+       hw bound check is enabled * /
 #endif
 
-    /* Set exec env, so it can be later retrieved from instance */
+    / * Set exec env, so it can be later retrieved from instance * /
     module_inst->cur_exec_env = exec_env;
 
-    /* TODO Why exec_env should be passed twice? (as arg and in modul_inst) */
+    / * TODO Why exec_env should be passed twice? (as arg and in modul_inst) * /
     wasm_interp_resume_wasm(module_inst, argv);
     return !wasm_copy_exception(module_inst, NULL);
 }
+ */
 
 #if WASM_ENABLE_PERF_PROFILING != 0 || WASM_ENABLE_DUMP_CALL_STACK != 0
 /* look for the function name */

@@ -6763,6 +6763,7 @@ wasm_loader_unload(WASMModule *module)
     wasm_runtime_free(module);
 }
 
+/* TODO: REMOVE
 bool
 wasm_loader_load_stack(WASMExecEnv *exec_env, uint8 *buf, uint32 size,
 #if WASM_ENABLE_MULTI_MODULE != 0
@@ -6772,6 +6773,7 @@ wasm_loader_load_stack(WASMExecEnv *exec_env, uint8 *buf, uint32 size,
 {
 
 }
+ */
 
 bool
 wasm_loader_find_block_addr(WASMExecEnv *exec_env, BlockAddr *block_addr_cache,

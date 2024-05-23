@@ -330,8 +330,13 @@ union ieee754_double {
 };
 
 static bool
-execute_func(WASMModuleInstanceCommon *module_inst, const char *name,
-             int32 argc, char *argv[])
+execute_func(WASMModuleInstanceCommon *module_inst,
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+             WASMExecEnvCheckpoint *exec_env_checkpoint,
+#endif
+             const char *name,
+             int32 argc,
+             char *argv[])
 {
     WASMFunctionInstanceCommon *target_func;
     WASMFuncType *type = NULL;
@@ -377,6 +382,12 @@ execute_func(WASMModuleInstanceCommon *module_inst, const char *name,
                                    "create singleton exec_env failed");
         goto fail;
     }
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    if(exec_env_checkpoint != NULL) {
+        exec_env->exec_env_checkpoint = exec_env_checkpoint;
+        exec_env->state = RESTORING;
+    }
+#endif
 
 #if WASM_ENABLE_GC == 0 && WASM_ENABLE_REF_TYPES != 0
     for (i = 0; i < type->param_count; i++) {
@@ -882,6 +893,9 @@ fail:
 
 bool
 wasm_application_execute_func(WASMModuleInstanceCommon *module_inst,
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+                              WASMExecEnvCheckpoint *exec_env_checkpoint,
+#endif
                               const char *name, int32 argc, char *argv[])
 {
     bool ret;
@@ -889,7 +903,7 @@ wasm_application_execute_func(WASMModuleInstanceCommon *module_inst,
     WASMExecEnv *exec_env;
 #endif
 
-    ret = execute_func(module_inst, name, argc, argv);
+    ret = execute_func(module_inst, exec_env_checkpoint, name, argc, argv);
 
 #if WASM_ENABLE_MEMORY_PROFILING != 0
     exec_env = wasm_runtime_get_exec_env_singleton(module_inst);

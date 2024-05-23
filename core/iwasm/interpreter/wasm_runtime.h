@@ -525,9 +525,11 @@ void
 wasm_exec_env_restore_interp(WASMExecEnv *exec_env,
                              WASMExecEnvCheckpoint *exec_env_checkpoint);
 
+/* TODO: REMOVE
 WASMModuleInstance *
 wasm_get_sub_module_inst(const WASMModuleInstance *parent_module_inst,
                          const WASMModule *sub_module);
+ */
 #endif
 
 WASMModuleInstance *
@@ -556,11 +558,13 @@ wasm_set_running_mode(WASMModuleInstance *module_inst,
 WASMFunctionInstance *
 wasm_lookup_function(const WASMModuleInstance *module_inst, const char *name);
 
+/* TODO: REMOVE
 #if WASM_ENABLE_MIGRATING_INTERP != 0
 uint32
 wasm_get_function_index(const WASMModuleInstance *module_inst,
                         const WASMFunctionInstance *func);
 #endif
+*/
 
 #if WASM_ENABLE_MULTI_MODULE != 0
 WASMGlobalInstance *
@@ -584,9 +588,11 @@ bool
 wasm_call_function(WASMExecEnv *exec_env, WASMFunctionInstance *function,
                    unsigned argc, uint32 argv[]);
 
+/* TODO: REMOVE
 bool
 wasm_resume_function(WASMExecEnv *exec_env,
                      uint32 argv[]);
+*/
 
 void
 wasm_set_exception(WASMModuleInstance *module, const char *exception);

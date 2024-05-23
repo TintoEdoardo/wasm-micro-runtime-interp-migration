@@ -68,9 +68,9 @@ wasm_loader_unload(WASMModule *module);
  */
 
 /**
- * Load a WASM checkpoint from a specified byte buffer.
+ * Load a WASM src from a specified byte buffer.
  *
- * @param buf the byte buffer which contains the checkpoint data
+ * @param buf the byte buffer which contains the src data
  * @param size the size of the buffer
  * @param error_buf output of the exception info
  * @param error_buf_size the size of the exception string

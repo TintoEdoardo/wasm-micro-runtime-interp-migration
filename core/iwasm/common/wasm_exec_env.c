@@ -72,9 +72,13 @@ wasm_exec_env_create_internal(struct WASMModuleInstanceCommon *module_inst,
     exec_env->wasm_stack.top_boundary =
         exec_env->wasm_stack.bottom + stack_size;
     exec_env->wasm_stack.top = exec_env->wasm_stack.bottom;
+
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    exec_env->state = OPERATIONAL;
+#endif
 /*
 #if WASM_ENABLE_MIGRATING_INTERP != 0
-    / In this instance, we allocate a checkpoint stack as large
+    / In this instance, we allocate a src stack as large
      * as the wasm stack. This is inefficient, in fact, a smaller
      * stack will suffice, but for the time being, it serves it purposes.  /
     exec_env->checkpoint_stack.bottom =
@@ -233,11 +237,12 @@ wasm_exec_env_destroy(WASMExecEnv *exec_env)
 }
 
 #if WASM_ENABLE_MIGRATING_INTERP != 0
+/* TODO: REMOVE
 WASMExecEnvCheckpoint *
 wasm_exec_env_checkpoint_create(WASMExecEnv *exec_env,
                                 uint32 stack_size)
 {
-    /* Check that no native call are stacked.  */
+    / * Check that no native call are stacked.  * /
     assert(exec_env->native_call_in_stack > 0);
 
     WASMExecEnvCheckpoint *exec_enc_checkpoint;
@@ -256,6 +261,7 @@ wasm_exec_env_checkpoint_create(WASMExecEnv *exec_env,
 
     return exec_enc_checkpoint;
 }
+*/
 
 void
 wasm_exec_env_restore(WASMExecEnv *exec_env,
@@ -269,12 +275,14 @@ wasm_exec_env_restore(WASMExecEnv *exec_env,
     /* TODO: AOT is not supported yet.  */
 }
 
+/* TODO: REMOVE
 void
 wasm_exec_env_checkpoint_destroy(WASMExecEnvCheckpoint *exec_env_checkpoint)
 {
-    /* The internal checkpoint frame should be already destroyed.  */
+    / * The internal src frame should be already destroyed.  * /
     wasm_runtime_free(exec_env_checkpoint);
 }
+ */
 #endif
 
 WASMModuleInstanceCommon *

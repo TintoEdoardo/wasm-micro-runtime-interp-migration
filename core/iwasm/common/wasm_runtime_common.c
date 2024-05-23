@@ -1591,12 +1591,14 @@ wasm_runtime_create_exec_env(WASMModuleInstanceCommon *module_inst,
     return wasm_exec_env_create(module_inst, stack_size);
 }
 
+/* TODO: REMOVE
 void
 wasm_runtime_restore_exec_env(wasm_exec_env_t exec_env,
                               wasm_exec_env_checkpoint_t exec_env_checkpoint)
 {
     wasm_exec_env_restore(exec_env, exec_env_checkpoint);
 }
+ */
 
 void
 wasm_runtime_destroy_exec_env(WASMExecEnv *exec_env)
@@ -2265,6 +2267,13 @@ wasm_runtime_call_wasm(WASMExecEnv *exec_env,
     return ret;
 }
 
+void
+wasm_runtime_request_checkpoint(wasm_exec_env_t exec_env)
+{
+    exec_env->requested_migration = true;
+}
+
+/* TODO: REMOVE
 bool
 wasm_runtime_resume_wasm(WASMExecEnv *exec_env,
                          uint32 argv[])
@@ -2283,7 +2292,7 @@ wasm_runtime_resume_wasm(WASMExecEnv *exec_env,
         ret = wasm_resume_function(exec_env, new_argv);
 #endif
 #if WASM_ENABLE_AOT != 0
-    /* Not supported yet */
+    / * Not supported yet * /
 #endif
     if (!ret) {
         if (new_argv != argv) {
@@ -2294,6 +2303,7 @@ wasm_runtime_resume_wasm(WASMExecEnv *exec_env,
 
     return ret;
 }
+ */
 
 static void
 parse_args_to_uint32_array(WASMFuncType *type, wasm_val_t *args,

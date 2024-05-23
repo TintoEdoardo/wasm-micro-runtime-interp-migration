@@ -16,6 +16,10 @@ struct WASMModuleInstance;
 struct WASMFunctionInstance;
 struct WASMExecEnv;
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+struct WASMExecEnvCheckpoint ;
+#endif
+
 typedef struct WASMInterpFrame {
     /* The frame of the caller that are calling the current function. */
     struct WASMInterpFrame *prev_frame;
@@ -77,12 +81,13 @@ typedef struct WASMInterpFrame {
 
 #if WASM_ENABLE_MIGRATING_INTERP != 0
 typedef struct WASMInterpFrameCheckpoint {
-    struct WASMInterpFrameCheckpoint *prev_frame;
+    struct WASMInterpFrameCheckpoint *next_frame;
 
     /* TODO: REMOVE
     char *module_name;
      */
     uint32 func_index;
+    uint32  size;
 
     /**
      * Frame data, the layout is:
@@ -135,6 +140,7 @@ wasm_interp_call_wasm(struct WASMModuleInstance *module_inst,
                       struct WASMFunctionInstance *function, uint32 argc,
                       uint32 argv[]);
 
+/* TODO: REMOVE
 struct WASMExecEnvCheckpoint *
 wasm_interp_produce_checkpoint(struct WASMExecEnv *exec_env);
 
@@ -146,6 +152,12 @@ wasm_interp_restore_exec_env(struct WASMModuleInstance *module_inst,
 void
 wasm_interp_resume_wasm(struct WASMModuleInstance *module_inst,
                         uint32 argv[]);
+*/
+
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+void
+wasm_copy_checkpoint(struct WASMExecEnvCheckpoint *dst, struct WASMExecEnvCheckpoint *src, uint32 stack_size);
+#endif
 
 #if WASM_ENABLE_GC != 0
 bool
