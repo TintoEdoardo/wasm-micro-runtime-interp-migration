@@ -112,25 +112,6 @@ get_sub_module_inst(const WASMModuleInstance *parent_module_inst,
 }
 #endif
 
-#if WASM_ENABLE_MIGRATING_INTERP != 0
-/* TODO: REMOVE
-void
-wasm_exec_env_restore_interp(WASMExecEnv *exec_env,
-                             WASMExecEnvCheckpoint *exec_env_checkpoint)
-{
-    wasm_interp_restore_exec_env(exec_env, exec_env_checkpoint);
-}
- */
-/* TODO: REMOVE
-WASMModuleInstance *
-wasm_get_sub_module_inst(const WASMModuleInstance *parent_module_inst,
-                         const WASMModule *sub_module)
-{
-    return get_sub_module_inst(parent_module_inst, sub_module);
-}
- */
-#endif
-
 /**
  * Destroy memory instances.
  */
@@ -716,10 +697,6 @@ functions_instantiate(const WASMModule *module, WASMModuleInstance *module_inst,
         module_inst->import_func_ptrs[i] =
             function->u.func_import->func_ptr_linked;
 
-#if WASM_ENABLE_MIGRATING_INTERP != 0
-        function->module = module_inst;
-#endif
-
         function++;
     }
 
@@ -742,6 +719,10 @@ functions_instantiate(const WASMModule *module, WASMModuleInstance *module_inst,
 
 #if WASM_ENABLE_FAST_INTERP != 0
         function->const_cell_num = function->u.func->const_cell_num;
+#endif
+
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+        function->module = module_inst;
 #endif
 
         function++;
@@ -3269,31 +3250,6 @@ wasm_call_function(WASMExecEnv *exec_env, WASMFunctionInstance *function,
     interp_call_wasm(module_inst, exec_env, function, argc, argv);
     return !wasm_copy_exception(module_inst, NULL);
 }
-
-/* TODO: REMOVE
-bool
-wasm_resume_function(WASMExecEnv *exec_env,
-                     uint32 argv[])
-{
-    WASMModuleInstance *module_inst =
-        (WASMModuleInstance *)exec_env->module_inst;
-
-#ifndef OS_ENABLE_HW_BOUND_CHECK
-    / * Set thread handle and stack boundary * /
-    wasm_exec_env_set_thread_info(exec_env);
-#else
-    / * Set thread info in call_wasm_with_hw_bound_check when
-       hw bound check is enabled * /
-#endif
-
-    / * Set exec env, so it can be later retrieved from instance * /
-    module_inst->cur_exec_env = exec_env;
-
-    / * TODO Why exec_env should be passed twice? (as arg and in modul_inst) * /
-    wasm_interp_resume_wasm(module_inst, argv);
-    return !wasm_copy_exception(module_inst, NULL);
-}
- */
 
 #if WASM_ENABLE_PERF_PROFILING != 0 || WASM_ENABLE_DUMP_CALL_STACK != 0
 /* look for the function name */

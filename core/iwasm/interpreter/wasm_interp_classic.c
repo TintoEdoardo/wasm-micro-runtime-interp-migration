@@ -1139,45 +1139,84 @@ FREE_FRAME(WASMExecEnv *exec_env, WASMInterpFrame *frame)
 }
 
 #if WASM_ENABLE_MIGRATING_INTERP != 0
+static inline void
+checkpoint_block_addr(WASMInterpFrame *frame, BlockAddrCheckpoint dst, BlockAddr src) {
+    (void)0;
+}
+
 static inline WASMExecEnvCheckpoint *
 ALLOC_CHECKPOINT_STACK(WASMExecEnv *exec_env)
 {
     /* Check that no native call are stacked.  */
     assert(exec_env->native_call_in_stack == 0);
 
-    WASMExecEnvCheckpoint *exec_enc_checkpoint;
+    WASMExecEnvCheckpoint *exec_env_checkpoint;
     uint32 stack_size = exec_env->wasm_stack_size;
     uint64 total_size = sizeof(WASMExecEnvCheckpoint) + (uint64)stack_size;
 
     if (total_size >= UINT32_MAX
-        || !(exec_enc_checkpoint = wasm_runtime_malloc((uint32)total_size)))
+        || !(exec_env_checkpoint = wasm_runtime_malloc((uint32)total_size)))
         return NULL;
 
-    memset(exec_enc_checkpoint, 0, (uint32)total_size);
+    memset(exec_env_checkpoint, 0, (uint32)total_size);
 
-    exec_enc_checkpoint->size = stack_size;
-    exec_enc_checkpoint->bottom =
-        (uint8 *)exec_enc_checkpoint + sizeof(WASMExecEnvCheckpoint);
-    exec_enc_checkpoint->top = exec_enc_checkpoint->bottom;
-    exec_enc_checkpoint->cur_frame = NULL;
+    exec_env_checkpoint->size = stack_size;
+    exec_env_checkpoint->bottom =
+            (uint8 *)exec_env_checkpoint + sizeof(WASMExecEnvCheckpoint);
+    exec_env_checkpoint->top = exec_env_checkpoint->bottom;
+    exec_env_checkpoint->cur_frame = NULL;
 
-    return exec_enc_checkpoint;
+    return exec_env_checkpoint;
 }
+
+#define CHECKPOINT_CONTEXT_DATA(exec_env_checkpoint)                        \
+    do {                                                                    \
+        exec_env_checkpoint->opcode = opcode;                               \
+        exec_env_checkpoint->else_addr_offset = else_addr - frame_ip;       \
+        exec_env_checkpoint->end_addr_offset  = end_addr - frame_ip;        \
+        exec_env_checkpoint->maddr_offset     = maddr - memory->memory_data; \
+        exec_env_checkpoint->local_idx        = local_idx;                  \
+        exec_env_checkpoint->local_offset     = local_offset;               \
+        exec_env_checkpoint->global_idx       = global_idx;                 \
+        exec_env_checkpoint->fidx             = fidx;                       \
+        exec_env_checkpoint->tidx             = tidx;                       \
+        exec_env_checkpoint->local_type       = local_type;                 \
+    } while (0)
 
 static inline WASMInterpFrameCheckpoint *
 PUSH_FRAME_CHECKPOINT(WASMExecEnv *exec_env,
                       WASMInterpFrame *cur_frame)
 {
-    printf("Inside PUSH_FRAME_CHECKPOINT\n ");
+    //printf("Remaining instructions: \n");
+    //for(uint8* ip_i = cur_frame->ip; ip_i != NULL; ip_i++) {
+    //uint8* ip_i = cur_frame->ip;
+    //for(int i = 0; i <10; i++) {
+    //    printf("%x \n", ip_i[i]);
+    //}
+
     /* This procedure allocate a checkpoint frame within
      * the checkpoint stack, previously allocated.  */
     WASMExecEnvCheckpoint *exec_env_checkpoint =
             exec_env->exec_env_checkpoint;
 
     /* The new checkpoint frame.  */
-    WASMInterpFrameCheckpoint *frame_checkpoint;
+    WASMInterpFrameCheckpoint *frame_checkpoint = NULL;
 
     WASMFunctionInstance *cur_func = cur_frame->function;
+
+    if (cur_func == NULL) {
+        /* We have reached the last frame.
+         * Only a minimal frame has to be allocated.  */
+        unsigned frame_size = wasm_interp_interp_frame_size(0);
+        frame_checkpoint = (void *)exec_env_checkpoint->top;
+
+        /* Then update the stack top.  */
+        exec_env_checkpoint->top = (uint8 *)frame_checkpoint + frame_size;
+
+        memset(frame_checkpoint, 0, (uint32)frame_size);
+
+        return  frame_checkpoint;
+    }
 
     /* Compute the size of the src frame.  */
     unsigned all_cell_num =
@@ -1209,17 +1248,33 @@ PUSH_FRAME_CHECKPOINT(WASMExecEnv *exec_env,
     uint8 size = sizeof(WASMInterpFrameCheckpoint);
     uint8 *next_section = (uint8 *)frame_checkpoint + size;
 
-    /* TODO: REMOVE
-     * Copy the module name.
-    frame_checkpoint->module_name = (char *)next_section;
-    char *module_name = module->module->name;
-    uint8 module_name_len = strlen(module_name);
-    for(int i = 0; i < module_name_len; i++) {
-        frame_checkpoint->module_name[i] = module_name[i];
+    /* Compute and copy the function index.
+     * To this end, we should use the references within the deepest frame
+     * which corresponds to the outermost function invocation.  */
+    bool is_outermost = false;
+    WASMInterpFrame *outermost_interp_frame, *next_frame = cur_frame;
+    while (!is_outermost) {
+        outermost_interp_frame = next_frame;
+        next_frame = next_frame->prev_frame;
+        if (next_frame->prev_frame == NULL) {
+            is_outermost = true;
+        }
     }
 
-    next_section = (uint8 *)next_section + module_name_len;
-     */
+    WASMModuleInstance *outermost_module_inst = outermost_interp_frame->function->module;
+    uint8 func_idx, func_count = outermost_module_inst->e->function_count;
+    WASMFunctionInstance *candidate_func;
+    for (func_idx = 0; func_idx < func_count; func_idx++) {
+        candidate_func = outermost_module_inst->e->functions + func_idx;
+        if (candidate_func->is_import_func)
+            candidate_func = candidate_func->import_func_inst;
+        if (cur_func == candidate_func) {
+            break;
+        }
+    }
+    assert(func_idx < func_count);
+
+    frame_checkpoint->func_index = func_idx;
 
     /* Copy locals from the cur_frame.  */
     frame_checkpoint->lp = (uint32 *)next_section;
@@ -1233,21 +1288,40 @@ PUSH_FRAME_CHECKPOINT(WASMExecEnv *exec_env,
     assert((uint8 *)frame_checkpoint->lp + local_count < exec_env_checkpoint->top);
 
     /* Copy the instruction pointer (ip) offset.  */
-    if(cur_frame->ip != NULL) {
+    if (cur_frame->ip != NULL) {
         uint8 *ip = cur_frame->ip;
         uint8 *ip_start = wasm_get_func_code(cur_func);
         uint8 ip_offset = ip - ip_start;
+        frame_checkpoint->ip_offset = ip_offset;
+    }
+    else if (cur_frame->ip_before_import_call != NULL) {
+        uint8 *ip_b_i_c = cur_frame->ip_before_import_call;
+        uint8 *ip_start = wasm_get_func_code(cur_func);
+        uint8 ip_offset = ip_b_i_c - ip_start;
         frame_checkpoint->ip_offset = ip_offset;
     }
     else {
         frame_checkpoint->ip_offset = 0;
     }
 
-    /* Copy the operand stack pointer (sp) offset.  */
+    /* Copy the operand stack.  */
+    frame_checkpoint->sp_bottom =
+            (void *)frame_checkpoint->lp + (local_count);
+    uint32 *sp_checkpoint = frame_checkpoint->sp_bottom;
+    uint32 *sp     = cur_frame->sp_bottom,
+           *sp_top = cur_frame->sp_boundary;
+    unsigned i_sp = 0;
+    while(sp != sp_top) {
+        sp_checkpoint[i_sp] = *sp;
+        i_sp += 1;
+        sp += 1;
+    }
+
+    /* Checkpoint sp_boundary and the operand stack pointer.  */
+    frame_checkpoint->sp_boundary = frame_checkpoint->sp_bottom + i_sp;
     if(cur_frame->sp != NULL) {
-        uint32 *sp = cur_frame->sp;
-        uint32 *sp_start = cur_frame->sp_bottom;
-        uint32 sp_offset = sp - sp_start;
+        uint8 *sp_start = (uint8 *)cur_frame->sp_bottom;
+        uint8 sp_offset = (uint8 *)cur_frame->sp - sp_start;
         frame_checkpoint->sp_offset = sp_offset;
     }
     else {
@@ -1255,9 +1329,9 @@ PUSH_FRAME_CHECKPOINT(WASMExecEnv *exec_env,
     }
 
     /* Copy the label stack pointer (csp) offset.  */
-    frame_checkpoint->csp_bottom = \
-        (void *)frame_checkpoint->lp + (local_count + 1);
-    WASMBranchBlockCheckpoint *csp_checkpoint = \
+    frame_checkpoint->csp_bottom =
+        (void *)(frame_checkpoint->sp_boundary + 1);
+    WASMBranchBlockCheckpoint *csp_checkpoint =
         frame_checkpoint->csp_bottom;
     WASMBranchBlock *csp = cur_frame->csp_bottom,
                     *top = cur_frame->csp_boundary;
@@ -1279,18 +1353,10 @@ PUSH_FRAME_CHECKPOINT(WASMExecEnv *exec_env,
 
     /* Finally, update frame_checkpoint->csp_boundary
      * and frame_checkpoint->csp.  */
-    printf("Size of BB = %lu Size of BB_CP = %lu \n",sizeof(WASMBranchBlock), sizeof(WASMBranchBlockCheckpoint));
-    printf("Length of BB = %ld \n", cur_frame->csp_boundary - cur_frame->csp_bottom);
-    printf("Frame size = %u \n", frame_size);
     frame_checkpoint->csp_boundary = frame_checkpoint->csp_bottom + i_csp;
     uint32 *cur_frame_csp_bottom = (uint32 *)cur_frame->csp_bottom;
-    if(cur_frame->csp != NULL) {
-        uint32 *cur_frame_csp = (uint32 *)cur_frame->csp;
-        frame_checkpoint->csp_offset = cur_frame_csp - cur_frame_csp_bottom;
-    }
-    else {
-        frame_checkpoint->csp_offset = 0;
-    }
+    uint32 *cur_frame_csp = (uint32 *)cur_frame->csp;
+    frame_checkpoint->csp_offset = (void *)cur_frame_csp - (void *)cur_frame_csp_bottom;
 
     return frame_checkpoint;
 }
@@ -1305,11 +1371,11 @@ PUSH_ALL_FRAME_CHECKPOINT(WASMExecEnv *exec_env)
     WASMExecEnvCheckpoint *exec_env_checkpoint = exec_env->exec_env_checkpoint;
     WASMInterpFrameCheckpoint *cur_frame_checkpoint;
 
-    while(cur_frame->prev_frame != NULL) {
-        prev_frame = cur_frame->prev_frame;
+    while(cur_frame != NULL) {
+        prev_frame           = cur_frame->prev_frame;
         cur_frame_checkpoint = PUSH_FRAME_CHECKPOINT(exec_env, cur_frame);
         cur_frame_checkpoint->next_frame = exec_env_checkpoint->cur_frame;
-        exec_env_checkpoint->cur_frame = cur_frame_checkpoint;
+        exec_env_checkpoint->cur_frame   = cur_frame_checkpoint;
         FREE_FRAME(exec_env, cur_frame);
         wasm_exec_env_set_cur_frame(exec_env, prev_frame);
         cur_frame = exec_env->cur_frame;
@@ -1322,55 +1388,68 @@ POP_FRAME_CHECKPOINT(WASMExecEnv *exec_env,
                      WASMFunctionInstance *cur_func,
                      WASMInterpFrame *cur_frame)
 {
-    printf("Inside POP_FRAME_CHECKPOINT\n ");
     /* Pop the last checkpoint_frame in exec_env_checkpoint, namely
      * the outermost call in this stack, and restore it to cur_frame.  */
 
-    /* The src stack.  */
+    /* The checkpoint stack.  */
     WASMExecEnvCheckpoint *exec_env_checkpoint = exec_env->exec_env_checkpoint;
 
     /* The current checkpoint_frame.  */
     WASMInterpFrameCheckpoint *cur_frame_checkpoint = exec_env_checkpoint->cur_frame;
 
-    /* Restore the previous references.  */
-    uint8 *base_ip = wasm_get_func_code(cur_func);
-    if(cur_frame_checkpoint->ip_offset != 0) {
-        cur_frame->ip = base_ip + cur_frame_checkpoint->ip_offset;
-    }
-    else
-    {
-        cur_frame->ip = NULL;
-    }
-    if(cur_frame_checkpoint->sp_offset != 0) {
-        cur_frame->sp = cur_frame->sp_bottom + cur_frame_checkpoint->sp_offset;
+    if(cur_frame_checkpoint->size == 0){
+        /* This is the first frame, which is an empty one.  */
+        (void)0;
     }
     else {
-        cur_frame->sp = NULL;
-    }
-    memcpy(cur_frame->lp, cur_frame_checkpoint->lp, (uint32)(cur_func->local_cell_num * 4));
+        /* Restore the previous references.  */
+        uint8 *base_ip = wasm_get_func_code(cur_func);
+        if(cur_frame_checkpoint->ip_offset != 0) {
+            cur_frame->ip = base_ip + cur_frame_checkpoint->ip_offset;
+        }
+        else
+        {
+            cur_frame->ip = NULL;
+        }
 
-    /* Restore the csp label stack.  */
-    WASMBranchBlock *csp = cur_frame->csp_bottom;
-    WASMBranchBlockCheckpoint *csp_checkpoint = \
+        memcpy(cur_frame->lp, cur_frame_checkpoint->lp, (uint32)(cur_func->local_cell_num * 4));
+
+        /* Restore the operand stack.  */
+        uint32 *sp_checkpoint = cur_frame_checkpoint->sp_bottom,
+               *sp_top        = cur_frame_checkpoint->sp_boundary;
+        unsigned i_sp = 0;
+        while(sp_checkpoint != sp_top) {
+            cur_frame->sp_bottom[i_sp] = *sp_checkpoint;
+            i_sp += 1;
+            sp_checkpoint += 1;
+        }
+
+        /* Restore the operand stack top pointer.  */
+        if(cur_frame_checkpoint->sp_offset != 0) {
+            cur_frame->sp = (void *)cur_frame->sp_bottom + cur_frame_checkpoint->sp_offset;
+        }
+        else {
+            cur_frame->sp = cur_frame->sp_bottom;
+        }
+
+        /* Restore the csp label stack.  */
+        WASMBranchBlock *csp = cur_frame->csp_bottom;
+        WASMBranchBlockCheckpoint *csp_checkpoint = \
         cur_frame_checkpoint->csp_bottom;
-    WASMBranchBlockCheckpoint *top = cur_frame_checkpoint->csp_boundary;
-    unsigned i_csp = 0;
-    while(csp_checkpoint != top){
-        restore_csp(csp + i_csp,
-                    csp_checkpoint,
-                    base_ip,
-                    cur_frame->sp_bottom);
-        /* Increment the index and csp. */
-        i_csp += 1;
-        csp_checkpoint += 1;
-    }
+        WASMBranchBlockCheckpoint *top = cur_frame_checkpoint->csp_boundary;
+        unsigned i_csp = 0;
+        while(csp_checkpoint != top){
+            restore_csp(csp + i_csp,
+                        csp_checkpoint,
+                        base_ip,
+                        cur_frame->sp_bottom);
+            /* Increment the index and csp. */
+            i_csp += 1;
+            csp_checkpoint += 1;
+        }
 
-    /* Set cur_frame->csp.  */
-    if(cur_frame_checkpoint->csp_offset != 0) {
-        cur_frame->csp = cur_frame->csp_bottom + cur_frame_checkpoint->csp_offset;
-    }
-    else {
-        cur_frame->csp = NULL;
+        /* Set cur_frame->csp.  */
+        cur_frame->csp = (void *)cur_frame->csp_bottom + cur_frame_checkpoint->csp_offset;
     }
 
     /* Remove the upper frame in exec_env_checkpoint.  */
@@ -1539,6 +1618,7 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
     WASMFunctionInstance *sub_func_inst = cur_func->import_func_inst;
     WASMFunctionImport *func_import = cur_func->u.func_import;
     uint8 *ip = prev_frame->ip;
+    prev_frame->ip_before_import_call = ip;
     char buf[128];
     WASMExecEnv *sub_module_exec_env = NULL;
     uintptr_t aux_stack_origin_boundary = 0;
@@ -1578,6 +1658,13 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
     /* call function of sub-module*/
     wasm_interp_call_func_bytecode(sub_module_inst, exec_env, sub_func_inst,
                                    prev_frame);
+
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    if (exec_env->state == CHECKPOINTED) {
+        /* We have to stop return here, without restoring any context information.  */
+        return;
+    }
+#endif
 
     /* restore ip and other replaced */
     prev_frame->ip = ip;
@@ -1638,7 +1725,10 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
 #if WASM_ENABLE_LABELS_AS_VALUES != 0
 
 #define HANDLE_OP(opcode) HANDLE_##opcode:
-#define FETCH_OPCODE_AND_DISPATCH() goto *handle_table[*frame_ip++]
+#define FETCH_OPCODE_AND_DISPATCH()  \
+    do {                             \
+        goto *handle_table[*frame_ip++];  \
+    } while (0)  \
 
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_DEBUG_INTERP != 0
 #define HANDLE_OP_END()                                                   \
@@ -1662,15 +1752,14 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
         if(exec_env->requested_migration       &&                            \
            exec_env->native_call_in_stack == 0 &&                            \
            exec_env->state == OPERATIONAL) {                                 \
-            exec_env->state = CHECKPOINTING;                                 \
+            printf("### migration request ### \n");                          \
             exec_env->requested_migration = false;                           \
             exec_env->exec_env_checkpoint = ALLOC_CHECKPOINT_STACK(exec_env);\
+            CHECKPOINT_CONTEXT_DATA(exec_env->exec_env_checkpoint);          \
+            SYNC_ALL_TO_FRAME();                                             \
             PUSH_ALL_FRAME_CHECKPOINT(exec_env);                             \
             exec_env->state = CHECKPOINTED;                                  \
             return;                                                          \
-        }                                                                    \
-        else if(exec_env->state == RESTORING) {                              \
-            printf("exec_env->state == RESTORING. \n");                      \
         }                                                                    \
         FETCH_OPCODE_AND_DISPATCH();                                         \
     } while (0)
@@ -6811,11 +6900,9 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
             PUSH_CSP(LABEL_TYPE_FUNCTION, 0, cell_num, frame_ip_end - 1);
 
             wasm_exec_env_set_cur_frame(exec_env, frame);
-            printf("Salute\n");
 
 #if WASM_ENABLE_MULTI_MODULE != 0 && WASM_ENABLE_MIGRATING_INTERP != 0
             if(exec_env->state == RESTORING){
-                printf("Restoring. \n");
 
                 assert(exec_env->exec_env_checkpoint != NULL);
 
@@ -6831,13 +6918,23 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                     /* Here, after removing the top checkpoint_frame we
                      * know that exec_env_checkpoint has still at least
                      * a checkpoint_frame, which is cur_frame.  */
+                    WASMInterpFrameCheckpoint *next_frame = exec_env_checkpoint->cur_frame;
 
-                    uint32 fun_index = \
+                    prev_frame = frame;
+
+
+                    /* Note how next_frame->func_index is extracted from the outermost
+                     * function invocation, in PUSH_FRAME_CHECKPOINT, and it does not
+                     * correspond of the instance function index in the submodule.  */
+                    cur_func = module->e->functions + next_frame->func_index;
+
+                    goto call_func_from_entry;
+
+                    /* uint32 fun_index =
                         exec_env_checkpoint->cur_frame->func_index;
-                    WASMFunctionInstance *func = \
+                    WASMFunctionInstance *func =
                         module->e->functions + fun_index;
-
-                    wasm_interp_call_func_bytecode(module, exec_env, func, frame);
+                    wasm_interp_call_func_bytecode(module, exec_env, func, frame); */
                 }
                 else {
                     /* If we are here, the restore steps of the exec_env
@@ -6845,15 +6942,43 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                      * Therefore, exec_env_checkpoint is empty, and can be
                      * safely deallocated.  */
 
+                    /* Restore the context data.  */
+                    UPDATE_ALL_FROM_FRAME();
+                    opcode = exec_env_checkpoint->opcode;
+                    else_addr = frame_ip + exec_env_checkpoint->else_addr_offset;
+                    end_addr  = frame_ip + exec_env_checkpoint->end_addr_offset;
+                    // fidx      = exec_env_checkpoint->fidx;
+                    // tidx      = exec_env_checkpoint->tidx;
+                    // maddr     = memory->memory_data + exec_env_checkpoint->maddr_offset;
+                    // local_idx = exec_env_checkpoint->local_idx;
+                    // local_offset = exec_env_checkpoint->local_offset;
+                    // global_idx   = exec_env_checkpoint->global_idx;
+                    // local_type   = exec_env_checkpoint->local_type;
+
+                    /* Restore the linear memory.  */
+                    /* TODO: this is a temporary solution.
+                     * To be extended to support multiple memories.  */
+                    memcpy(memory->memory_data,
+                           exec_env_checkpoint->memory_data,
+                           exec_env_checkpoint->memory_data_size);
+
                     wasm_runtime_free(exec_env_checkpoint);
                     exec_env->exec_env_checkpoint = NULL;
+                    exec_env->state = OPERATIONAL;
                 }
-                exec_env->state = OPERATIONAL;
             }
 #endif
         }
 #if WASM_ENABLE_THREAD_MGR != 0
         CHECK_SUSPEND_FLAGS();
+#endif
+
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+        if (exec_env->state == CHECKPOINTED) {
+            /* The state has been checkpointed, hence the funciton
+             * execution should end here.  */
+            return;
+        }
 #endif
         HANDLE_OP_END();
     }
@@ -7475,11 +7600,18 @@ wasm_interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
             return;
         }
 
-        if (argc > 0)
+        if (argc > 0) {
             word_copy(outs_area->lp, argv, argc);
+        }
 
         wasm_exec_env_set_cur_frame(exec_env, frame);
     }
+
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    if(exec_env->state == RESTORING) {
+        POP_FRAME_CHECKPOINT(exec_env, function, frame);
+    }
+#endif
 
 #if defined(os_writegsbase)
     {
@@ -7495,6 +7627,10 @@ wasm_interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
         if (function->import_module_inst) {
             wasm_interp_call_func_import(module_inst, exec_env, function,
                                          frame);
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+            if (exec_env->state == CHECKPOINTED)
+                return;
+#endif
         }
         else
 #endif
@@ -7594,426 +7730,33 @@ wasm_copy_checkpoint(WASMExecEnvCheckpoint *dst, WASMExecEnvCheckpoint *src, uin
     WASMInterpFrameCheckpoint *cur_frame = (void *)src->bottom, *dst_cur_frame = (void *)dst->bottom;
     dst->cur_frame = NULL;
     while(cur_frame <= src->cur_frame) {
-
-        uint32 frame_size = cur_frame->size;
+        uint32 frame_size = cur_frame->size > 0 ? cur_frame->size : sizeof(WASMInterpFrameCheckpoint);
 
         /* Initialize the required offsets.  */
         uint32 lp_offset           = 0;
+        uint32 sp_bottom_offset    = 0;
+        uint32 sp_boundary_offset  = 0;
         uint32 csp_bottom_offset   = 0;
         uint32 csp_boundary_offset = 0;
 
         /* Compute the required offsets.  */
         lp_offset           = (uint8 *)cur_frame->lp           - base_addr;
+        sp_bottom_offset    = (uint8 *)cur_frame->sp_bottom    - base_addr;
+        sp_boundary_offset  = (uint8 *)cur_frame->sp_boundary  - base_addr;
         csp_bottom_offset   = (uint8 *)cur_frame->csp_bottom   - base_addr;
         csp_boundary_offset = (uint8 *)cur_frame->csp_boundary - base_addr;
 
         /* Restore the proper references from the offsets.  */
         dst_cur_frame->next_frame   = dst->cur_frame;
         dst_cur_frame->lp           = (void *)dst_base_addr + lp_offset;
+        dst_cur_frame->sp_bottom    = (void *)dst_base_addr + sp_bottom_offset;
+        dst_cur_frame->sp_boundary  = (void *)dst_base_addr + sp_boundary_offset;
         dst_cur_frame->csp_bottom   = (void *)dst_base_addr + csp_bottom_offset;
         dst_cur_frame->csp_boundary = (void *)dst_base_addr + csp_boundary_offset;
 
         dst->cur_frame = dst_cur_frame;
         dst_cur_frame  = (void *)dst_cur_frame + frame_size;
         cur_frame      = (void *)cur_frame     + frame_size;
-
-
     }
 }
 #endif
-
-/*
- * TODO: REMOVE
-static void
-wasm_interp_restore_frame(WASMModuleInstance *module_inst,
-                          WASMExecEnv *exec_env,
-                          WASMFunctionInstance *function,
-                          WASMInterpFrameCheckpoint *framec,
-                          WASMInterpFrame *prev_frame)
-{
-    WASMRuntimeFrame *frame = NULL, *prev_frame, *outs_area;
-    RunningMode running_mode =
-        wasm_runtime_get_running_mode((WASMModuleInstanceCommon *)module_inst);
-    / * Allocate sufficient cells for all kinds of return values.  * /
-    bool alloc_frame = true;
-
-    if (argc < function->param_cell_num) {
-        char buf[128];
-        snprintf(buf, sizeof(buf),
-                 "invalid argument count %" PRIu32
-                 ", must be no smaller than %u",
-                 argc, function->param_cell_num);
-        wasm_set_exception(module_inst, buf);
-        return;
-    }
-    argc = function->param_cell_num;
-
-    RECORD_STACK_USAGE(exec_env, (uint8 *)&prev_frame);
-
-    if (alloc_frame) {
-        unsigned all_cell_num =
-            function->ret_cell_num > 2 ? function->ret_cell_num : 2;
-        unsigned frame_size;
-
-        prev_frame = wasm_exec_env_get_cur_frame(exec_env);
-        / * This frame won't be used by JITed code, so only allocate interp
-           frame here.  * /
-        frame_size = wasm_interp_interp_frame_size(all_cell_num);
-
-        if (!(frame = ALLOC_FRAME(exec_env, frame_size, prev_frame)))
-            return;
-
-        outs_area = wasm_exec_env_wasm_stack_top(exec_env);
-        frame->function = NULL;
-        frame->ip = NULL;
-        / * There is no local variable. * /
-        frame->sp = frame->lp + 0;
-
-        if ((uint8 *)(outs_area->lp + function->param_cell_num)
-            > exec_env->wasm_stack.top_boundary) {
-            wasm_set_exception(module_inst, "wasm operand stack overflow");
-            return;
-        }
-
-        if (argc > 0)
-            word_copy(outs_area->lp, argv, argc);
-
-        wasm_exec_env_set_cur_frame(exec_env, frame);
-    }
-
-#if defined(os_writegsbase)
-    {
-        WASMMemoryInstance *memory_inst = wasm_get_default_memory(module_inst);
-        if (memory_inst)
-            / * write base addr of linear memory to GS segment register * /
-            os_writegsbase(memory_inst->memory_data);
-    }
-#endif
-
-    if (function->is_import_func) {
-#if WASM_ENABLE_MULTI_MODULE != 0
-        if (function->import_module_inst) {
-            wasm_interp_call_func_import(module_inst, exec_env, function,
-                                         frame);
-        }
-        else
-#endif
-        {
-            / * it is a native function * /
-            wasm_interp_call_func_native(module_inst, exec_env, function,
-                                         frame);
-        }
-    }
-    else {
-        if (running_mode == Mode_Interp) {
-            wasm_interp_call_func_bytecode(module_inst, exec_env, function,
-                                           frame);
-        }
-#if WASM_ENABLE_FAST_JIT != 0
-        else if (running_mode == Mode_Fast_JIT) {
-            fast_jit_call_func_bytecode(module_inst, exec_env, function, frame);
-        }
-#endif
-#if WASM_ENABLE_JIT != 0
-        else if (running_mode == Mode_LLVM_JIT) {
-            llvm_jit_call_func_bytecode(module_inst, exec_env, function, argc,
-                                        argv);
-        }
-#endif
-#if WASM_ENABLE_LAZY_JIT != 0 && WASM_ENABLE_FAST_JIT != 0 \
-    && WASM_ENABLE_JIT != 0
-        else if (running_mode == Mode_Multi_Tier_JIT) {
-            / * Tier-up from Fast JIT to LLVM JIT, call llvm jit function
-               if it is compiled, else call fast jit function * /
-            uint32 func_idx = (uint32)(function - module_inst->e->functions);
-            if (module_inst->module->func_ptrs_compiled
-                    [func_idx - module_inst->module->import_function_count]) {
-                llvm_jit_call_func_bytecode(module_inst, exec_env, function,
-                                            argc, argv);
-            }
-            else {
-                fast_jit_call_func_bytecode(module_inst, exec_env, function,
-                                            frame);
-            }
-        }
-#endif
-        else {
-            / * There should always be a supported running mode selected * /
-            bh_assert(0);
-        }
-
-        (void)wasm_interp_call_func_bytecode;
-#if WASM_ENABLE_FAST_JIT != 0
-        (void)fast_jit_call_func_bytecode;
-#endif
-    }
-
-    / * Output the return value to the caller * /
-    if (!wasm_copy_exception(module_inst, NULL)) {
-        if (alloc_frame) {
-            uint32 i;
-            for (i = 0; i < function->ret_cell_num; i++) {
-                argv[i] = *(frame->sp + i - function->ret_cell_num);
-            }
-        }
-    }
-    else {
-#if WASM_ENABLE_DUMP_CALL_STACK != 0
-        if (wasm_interp_create_call_stack(exec_env)) {
-            wasm_interp_dump_call_stack(exec_env, true, NULL, 0);
-        }
-#endif
-    }
-
-    if (alloc_frame) {
-        wasm_exec_env_set_cur_frame(exec_env, prev_frame);
-        FREE_FRAME(exec_env, frame);
-    }
-}
-*/
-
-/*
- * TODO: REMOVE
-
-WASMExecEnvCheckpoint *
-wasm_interp_produce_checkpoint(WASMExecEnv *exec_env)
-{
-    WASMExecEnvCheckpoint *exec_env_checkpoint;
-
-    exec_env_checkpoint = wasm_exec_env_checkpoint_create(exec_env,
-                                    exec_env->wasm_stack_size);
-
-    / * Keeping this reference allows us to retrieve the src
-     * data from the exec_env while producing the src frames. * /
-    exec_env->exec_env_checkpoint = exec_env_checkpoint;
-
-    / * Produce the src of each frame within exec_env.  * /
-    WASMInterpFrame *cur_frame = exec_env->cur_frame;
-    WASMInterpFrameCheckpoint *cur_frame_checkpoint,
-        *prev_frame_checkpoint = NULL;
-    while(cur_frame != NULL) {
-        cur_frame_checkpoint = PUSH_FRAME_CHECKPOINT(exec_env, cur_frame);
-        if(!prev_frame_checkpoint){
-            prev_frame_checkpoint = cur_frame_checkpoint;
-        }
-        else{
-            cur_frame_checkpoint->prev_frame = prev_frame_checkpoint;
-            prev_frame_checkpoint->next_frame = cur_frame_checkpoint;
-        }
-        cur_frame = cur_frame->prev_frame;
-    }
-
-    return exec_env_checkpoint;
-}
-*/
-
-/*
- * TODO: REMOVE
-void
-wasm_interp_restore_exec_env(WASMModuleInstance *module_inst,
-                             WASMExecEnv *exec_env,
-                             WASMExecEnvCheckpoint *exec_env_checkpoint)
-{
-    / * Firstly, an initial frame is required.
-     * Unsurprisingly, this portion of the code is quite close to
-     * the body of wasm_interp_call_wasm (in wasm_interp_classic.c).  * /
-    WASMRuntimeFrame *initial_frame = NULL, *prev_frame, *outs_area;
-
-    WASMInterpFrameCheckpoint *outermost_frame = \
-        exec_env_checkpoint->outermost_frame;
-    WASMFunctionInstance *outermost_function = \
-        module_inst->e->functions + outermost_frame->func_index;
-
-    unsigned all_cell_num = \
-        outermost_function->ret_cell_num > 2 ? outermost_function->ret_cell_num : 2;
-    unsigned frame_size;
-
-    prev_frame = wasm_exec_env_get_cur_frame(exec_env);
-
-    frame_size = wasm_interp_interp_frame_size(all_cell_num);
-
-    if (!(initial_frame = ALLOC_FRAME(exec_env, frame_size, prev_frame)))
-        return;
-
-    outs_area = wasm_exec_env_wasm_stack_top(exec_env);
-    initial_frame->function = NULL;
-    initial_frame->ip = NULL;
-    / * There is no local variable. * /
-    initial_frame->sp = initial_frame->lp + 0;
-
-    if ((uint8 *)(outs_area->lp + outermost_function->param_cell_num)
-        > exec_env->wasm_stack.top_boundary) {
-        wasm_set_exception(module_inst, "wasm operand stack overflow");
-        return;
-    }
-
-    wasm_exec_env_set_cur_frame(exec_env, initial_frame);
-
-    / * From now on, the idea is to pass through all the src frames
-     * and allocate the corresponding interp_frame in exec_env.  * /
-#if WASM_ENABLE_FAST_INTERP != 0
-    / * TODO  * /
-#else
-    WASMInterpFrameCheckpoint *cur_frame;
-    char *module_name;
-    uint32 func_index;
-    WASMModule *module;
-
-    while(cur_frame != NULL){
-        / * Retrieve the information for the current checkpointed
-         * call in exec_env_checkpoint.  * /
-        module_name = cur_frame->module_name;
-        func_index = cur_frame->func_index;
-        module = \
-            (WASMModule *)wasm_runtime_find_module_registered(module_name);
-        / * TODO: pass from module_inst to sub_module_inst  * /
-        module_inst = \
-            wasm_get_sub_module_inst(module_inst, module);
-
-        WASMMemoryInstance *memory = wasm_get_default_memory(module_inst);
-
-        WASMFuncType **wasm_types = (WASMFuncType **)module_inst->module->types;
-        WASMGlobalInstance *globals = module_inst->e->globals, *global;
-        uint8 *global_data = module_inst->global_data;
-        uint8 opcode_IMPDEP = WASM_OP_IMPDEP;
-        WASMInterpFrame *frame = NULL;
-
-        register uint8 *frame_ip = \
-            wasm_get_func_code(func) + cur_frame->ip_offset;
-        register uint32 *frame_lp = frame->lp;
-
-        register uint32 *frame_sp = NULL;          / * cache of frame->sp * /
-#if WASM_ENABLE_GC != 0
-        register uint8 *frame_ref = NULL; / * cache of frame->ref * /
-        uint8 *frame_ref_tmp;
-#endif
-        WASMBranchBlock *frame_csp = NULL;
-        BlockAddr *cache_items;
-        uint8 *frame_ip_end = frame_ip + 1;
-        uint8 opcode;
-        uint32 i, depth, cond, count, fidx, tidx, lidx, frame_size = 0;
-        uint32 all_cell_num = 0;
-        int32 val;
-        uint8 *else_addr, *end_addr, *maddr = NULL;
-        uint32 local_idx, local_offset, global_idx;
-        uint8 local_type, *global_addr;
-        uint32 cache_index, type_index, param_cell_num, cell_num;
-#if WASM_ENABLE_EXCE_HANDLING != 0
-        int32_t exception_tag_index;
-#endif
-        uint8 value_type;
-#if !defined(OS_ENABLE_HW_BOUND_CHECK) \
-    || WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0
-#if WASM_CONFIGURABLE_BOUNDS_CHECKS != 0
-        bool disable_bounds_checks = !wasm_runtime_is_bounds_checks_enabled(
-            (WASMModuleInstanceCommon *)module);
-#else
-        bool disable_bounds_checks = false;
-#endif
-#endif
-#if WASM_ENABLE_GC != 0
-        WASMObjectRef gc_obj;
-        WASMStructObjectRef struct_obj;
-        WASMArrayObjectRef array_obj;
-        WASMFuncObjectRef func_obj;
-        WASMI31ObjectRef i31_obj;
-        WASMExternrefObjectRef externref_obj;
-#if WASM_ENABLE_STRINGREF != 0
-        WASMString str_obj = NULL;
-        WASMStringrefObjectRef stringref_obj;
-        WASMStringviewWTF8ObjectRef stringview_wtf8_obj;
-        WASMStringviewWTF16ObjectRef stringview_wtf16_obj;
-        WASMStringviewIterObjectRef stringview_iter_obj;
-#endif
-#endif
-#if WASM_ENABLE_TAIL_CALL != 0 || WASM_ENABLE_GC != 0
-        bool is_return_call = false;
-#endif
-#if WASM_ENABLE_MEMORY64 != 0
-        / * TODO: multi-memories for now assuming the memory idx type is consistent
-     * across multi-memories * /
-        bool is_memory64 = false;
-        if (memory)
-            is_memory64 = memory->is_memory64;
-#endif
-
-#if WASM_ENABLE_DEBUG_INTERP != 0
-        uint8 *frame_ip_orig = NULL;
-        WASMDebugInstance *debug_instance = wasm_exec_env_get_instance(exec_env);
-        bh_list *watch_point_list_read =
-            debug_instance ? &debug_instance->watch_point_list_read : NULL;
-        bh_list *watch_point_list_write =
-            debug_instance ? &debug_instance->watch_point_list_write : NULL;
-#endif
-    }
-#endif
-}
-*/
-
-/* TODO: REMOVE
-void
-wasm_interp_resume_wasm(struct WASMModuleInstance *module_inst,
-                        uint32 argv[])
-{
-
-    / * There is no need to pass the exec_env as an argument.  * /
-    WASMExecEnv *exec_env = module_inst->cur_exec_env;
-    / * The stack is already populated.  * /
-    WASMFunctionInstance *function = exec_env->cur_frame->function;
-    WASMInterpFrame *frame = exec_env->cur_frame,
-                    *prev_frame = frame->prev_frame,
-                    *outs_area;
-
-    RunningMode running_mode =
-        wasm_runtime_get_running_mode((WASMModuleInstanceCommon *)module_inst);
-
-    outs_area = wasm_exec_env_wasm_stack_top(exec_env);
-
-    / * This case is not fully supported yet.  * /
-    if (function->is_import_func) {
-#if WASM_ENABLE_MULTI_MODULE != 0
-        if (function->import_module_inst) {
-            wasm_interp_call_func_import(module_inst, exec_env, function,
-                                         frame);
-        }
-        else
-#endif
-        {
-            / * it is a native function * /
-            wasm_interp_call_func_native(module_inst, exec_env, function,
-                                         frame);
-        }
-    }
-    else {
-        if (running_mode == Mode_Interp) {
-            wasm_interp_call_func_bytecode(module_inst, exec_env, function,
-                                           frame);
-        }
-        else {
-            / * There should always be a supported running mode selected * /
-            bh_assert(0);
-        }
-        (void)wasm_interp_call_func_bytecode;
-    }
-
-    / * Output the return value to the caller * /
-    if (!wasm_copy_exception(module_inst, NULL)) {
-
-        uint32 i;
-        for (i = 0; i < function->ret_cell_num; i++) {
-            argv[i] = *(frame->sp + i - function->ret_cell_num);
-        }
-    }
-    else {
-#if WASM_ENABLE_DUMP_CALL_STACK != 0
-        if (wasm_interp_create_call_stack(exec_env)) {
-            wasm_interp_dump_call_stack(exec_env, true, NULL, 0);
-        }
-#endif
-    }
-
-    wasm_exec_env_set_cur_frame(exec_env, prev_frame);
-    FREE_FRAME(exec_env, frame);
-
-}
-*/

@@ -646,13 +646,6 @@ wasm_runtime_create_exec_env(WASMModuleInstanceCommon *module_inst,
                              uint32 stack_size);
 
 /* See wasm_export.h for description */
-/* TODO: REMOVE
- * WASM_RUNTIME_API_EXTERN void
-wasm_runtime_restore_exec_env(wasm_exec_env_t exec_env,
-                              wasm_exec_env_checkpoint_t exec_env_checkpoint);
-*/
-
-/* See wasm_export.h for description */
 WASM_RUNTIME_API_EXTERN void
 wasm_runtime_destroy_exec_env(WASMExecEnv *exec_env);
 
@@ -708,18 +701,6 @@ wasm_runtime_call_wasm_a(WASMExecEnv *exec_env,
 
 WASM_RUNTIME_API_EXTERN void
 wasm_runtime_request_checkpoint(wasm_exec_env_t exec_env);
-
-/* TODO: REMOVE
-WASM_RUNTIME_API_EXTERN bool
-wasm_runtime_resume_wasm(WASMExecEnv *exec_env,
-                         uint32 argv[]);
-
-WASM_RUNTIME_API_EXTERN bool
-wasm_runtime_resume_wasm_a(wasm_exec_env_t exec_env,
-                           uint8 *wasm_checkpoint_buf,
-                           wasm_function_inst_t function,
-                           uint32_t num_results, wasm_val_t results[]);
-*/
 
 WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_call_wasm_v(WASMExecEnv *exec_env,

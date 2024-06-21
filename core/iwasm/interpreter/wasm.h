@@ -751,6 +751,14 @@ typedef struct BlockAddr {
     uint8 *end_addr;
 } BlockAddr;
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+typedef struct BlockAddrCheckpoint {
+    uint8 *start_addr_offset;
+    uint8 *else_addr_offset;
+    uint8 *end_addr_offset;
+} BlockAddrCheckpoint;
+#endif
+
 #if WASM_ENABLE_LIBC_WASI != 0
 typedef struct WASIArguments {
     const char **dir_list;
@@ -1107,7 +1115,7 @@ typedef struct WASMBranchBlockCheckpoint {
      * - frame_sp_offset : offset of frame_sp from sp_bottom
      * - cell_num : cell_num  */
     uint32 begin_addr_offset;
-    uint32 target_addr_offset;
+    int64  target_addr_offset;
     uint32 frame_sp_offset;
     uint32 cell_num;
 } WASMBranchBlockCheckpoint;
@@ -1119,7 +1127,10 @@ checkpoint_csp(WASMBranchBlock *csp,
                const uint32 *frame_sp_bottom)
 {
     csp_checkpoint->begin_addr_offset  = csp->begin_addr - frame_ip_bottom;
-    csp_checkpoint->target_addr_offset = csp->target_addr - frame_ip_bottom;
+    if(!csp->target_addr)
+        csp_checkpoint->target_addr_offset = -1;
+    else
+        csp_checkpoint->target_addr_offset = csp->target_addr - frame_ip_bottom;
     csp_checkpoint->frame_sp_offset = csp->frame_sp - frame_sp_bottom;
     csp_checkpoint->cell_num = csp->cell_num;
 }
@@ -1131,9 +1142,12 @@ restore_csp(WASMBranchBlock *csp,
             uint32 *frame_sp_bottom)
 {
     csp->begin_addr  = frame_ip_bottom + csp_checkpoint->begin_addr_offset;
-    csp->target_addr = frame_ip_bottom + csp_checkpoint->target_addr_offset;
-    csp->frame_sp = frame_sp_bottom + csp_checkpoint->frame_sp_offset;
-    csp->cell_num = csp_checkpoint->cell_num;
+    if(csp_checkpoint->target_addr_offset != -1)
+        csp->target_addr = frame_ip_bottom + csp_checkpoint->target_addr_offset;
+    else
+        csp->target_addr = NULL;
+    csp->frame_sp    = frame_sp_bottom + csp_checkpoint->frame_sp_offset;
+    csp->cell_num    = csp_checkpoint->cell_num;
 }
 #endif
 

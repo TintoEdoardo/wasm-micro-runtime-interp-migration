@@ -199,6 +199,22 @@ typedef struct WASMExecEnv {
 typedef struct WASMExecEnvCheckpoint {
     struct WASMInterpFrameCheckpoint *cur_frame;
 
+    /* TODO: this is a temporary solution
+     * moving one single memory address. Should be extended to
+     * handle multiple memories.  */
+    uint8* memory_data;
+    uint64 memory_data_size;
+
+    /* Context information.  */
+    uint8 opcode;
+    uint8 else_addr_offset, end_addr_offset, maddr_offset;
+    uint32 local_idx, local_offset, global_idx, fidx, tidx;
+    uint8 local_type;
+
+// #if WASM_ENABLE_FAST_INTERP == 0
+//     BlockAddrCheckpoint block_addr_cache[BLOCK_ADDR_CACHE_SIZE][BLOCK_ADDR_CONFLICT_SIZE];
+// #endif
+
     /* The size of the stack. */
     uint32 size;
     /* The top to of the src stack which is free. */
@@ -233,20 +249,6 @@ wasm_exec_env_create(struct WASMModuleInstanceCommon *module_inst,
 
 void
 wasm_exec_env_destroy(WASMExecEnv *exec_env);
-
-/* TODO: REMOVE
- WASMExecEnvCheckpoint *
-wasm_exec_env_checkpoint_create(WASMExecEnv *exec_env,
-                                uint32 stack_size);
-
-
-void
-wasm_exec_env_restore(WASMExecEnv *exec_env,
-                      WASMExecEnvCheckpoint *exec_env_checkpoint);
-
-void
-wasm_exec_env_checkpoint_destroy(WASMExecEnvCheckpoint *exec_env_checkpoint);
-*/
 
 static inline bool
 wasm_exec_env_is_aux_stack_managed_by_runtime(WASMExecEnv *exec_env)

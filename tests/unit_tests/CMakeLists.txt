@@ -5,7 +5,7 @@ cmake_minimum_required (VERSION 3.14)
 
 include(CheckPIESupported)
 
-project(multi_module_checkpoint)
+project(unit_tests)
 
 ################  runtime settings  ################
 string (TOLOWER ${CMAKE_HOST_SYSTEM_NAME} WAMR_BUILD_PLATFORM)
@@ -147,7 +147,11 @@ ExternalProject_Add(WASM_MODULE
                        -S ${CMAKE_CURRENT_SOURCE_DIR}/wasm-apps
   BUILD_COMMAND      ${CMAKE_COMMAND} --build .
   INSTALL_COMMAND    ${CMAKE_COMMAND} -E copy
-                       ./counter.wasm ${CMAKE_BINARY_DIR}
+                       ./async_checkpoint.wasm ${CMAKE_BINARY_DIR}
+                       ./simple_function.wasm ${CMAKE_BINARY_DIR}
+                       ./loop_function.wasm ${CMAKE_BINARY_DIR}
+                       ./mA.wasm ${CMAKE_BINARY_DIR}
+                       ./mB.wasm ${CMAKE_BINARY_DIR}
 )
 
 ################ WASM MODULES TO AOT
@@ -177,7 +181,15 @@ if (WAMR_BUILD_AOT EQUAL 1)
     DEPENDS
     WASM_MODULE ${WAMR_COMPILER}
     COMMAND
-    ${WAMR_COMPILER} -o counter.aot ./counter.wasm
+    ${WAMR_COMPILER} -o async_checkpoint.aot ./async_checkpoint.wasm
+    COMMAND
+    ${WAMR_COMPILER} -o simple_function.aot ./simple_function.wasm
+    COMMAND
+    ${WAMR_COMPILER} -o loop_function.aot ./loop_function.wasm
+    COMMAND
+    ${WAMR_COMPILER} -o mA.aot ./mA.wasm
+    COMMAND
+    ${WAMR_COMPILER} -o mB.aot ./mB.wasm
     WORKING_DIRECTORY
     ${CMAKE_BINARY_DIR}
   )

@@ -6,6 +6,7 @@
 #include <platform_common.h>
 #include "wasm_export.h"
 #include <string.h>
+#include "wasm_runtime.h"
 #include "bh_read_file.h"
 
 #include "wasm_exec_env.h"
@@ -38,11 +39,15 @@ static struct WASMInterpFrameCheckpoint *frame_checkpoint;
 static char sandbox_memory_space[10 * 1024 * 1024] = { 0 };
 
 /* 6K */
-const uint32 stack_size = 2 * 1024;
+const uint32 stack_size = 6 * 1024;
 const uint32 heap_size = 6 * 1024;
 
 /* Parameters and return values.  */
 char *args[1] = { 0 };
+
+/* Exported native functions.  */
+void
+runtime_request_checkpoint();
 
 static char *module_search_path = ".";
 static bool
@@ -90,10 +95,24 @@ initialize_static_variables(const char *module_name)
         wasm_module_t _module = NULL;
         wasm_module_inst_t _module_inst = NULL;
 
+        static NativeSymbol native_symbols[] = {
+                {
+                        "runtime_request_checkpoint", // the name of WASM function name
+                        runtime_request_checkpoint,   // the native function pointer
+                        "",  // the function prototype signature, avoid to use i32
+                        NULL        // attachment is NULL
+                }
+        };
+
         /* All malloc() only from the given buffer.  */
         init_args.mem_alloc_type = Alloc_With_Pool;
         init_args.mem_alloc_option.pool.heap_buf = sandbox_memory_space;
         init_args.mem_alloc_option.pool.heap_size = sizeof(sandbox_memory_space);
+
+        /* Native symbols need below registration phase.  */
+        init_args.n_native_symbols = sizeof(native_symbols) / sizeof(NativeSymbol);
+        init_args.native_module_name = "env";
+        init_args.native_symbols = native_symbols;
 
         /* Initialize runtime environment.  */
         if (!wasm_runtime_full_init(&init_args)) {
@@ -180,16 +199,121 @@ test_wasm_runtime_request_checkpoint(void)
 static void *
 issue_migration_request(void *vargp)
 {
-    sleep(2);
+    sleep(1);
     wasm_runtime_request_checkpoint(exec_env);
     return NULL;
 }
 
 void
-test_checkpoint_of_loaded_function(void)
+runtime_request_checkpoint()
+{
+    printf("### runtime_request_checkpoint ### \n");
+    issue_migration_request((void *)0);
+}
+
+void
+test_checkpoint_of_simple_function(void)
 {
     /* Initialization.  */
-    initialize_static_variables("counter.wasm");
+    initialize_static_variables("simple_function.wasm");
+    WASMExecEnvCheckpoint *tmp_exec_env_checkp;
+
+    /* The function itself will issue the migration request.  */
+
+    /* Test 2.  */
+    wasm_application_execute_func(
+            (wasm_module_inst_t )module_inst,
+            NULL,
+            "simple_function", 0, args);
+    CU_ASSERT_EQUAL(exec_env->state, CHECKPOINTED);
+
+    /* Save a reference to the checkpoint.  */
+    tmp_exec_env_checkp = malloc(stack_size);
+    wasm_copy_checkpoint(tmp_exec_env_checkp, exec_env->exec_env_checkpoint, stack_size);
+
+    /* Copy the data section in linear memory.  */
+    WASMMemoryInstance *memory_inst = wasm_get_default_memory(module_inst);
+    uint64 memory_size  = memory_inst->memory_data_size;
+    uint8 *data_memory = memory_inst->memory_data;
+    uint8 *tmp_memory_data = malloc(memory_size);
+    memcpy(tmp_memory_data, data_memory, memory_size);
+
+    /* Free the WAMR runtime.  */
+    clean_static_variables();
+
+    /* Restart an execution from a checkpoint.  */
+    initialize_static_variables("simple_function.wasm");
+    exec_env_checkpoint = tmp_exec_env_checkp;
+    CU_ASSERT_PTR_NOT_NULL(exec_env_checkpoint);
+
+    /* Add a reference to tmp_memory_data.  */
+    exec_env_checkpoint->memory_data = tmp_memory_data;
+    exec_env_checkpoint->memory_data_size = memory_size;
+
+    wasm_application_execute_func(
+            (wasm_module_inst_t )module_inst,
+            exec_env_checkpoint,
+            "simple_function", 0, args);
+    CU_ASSERT_EQUAL(exec_env->state, OPERATIONAL);
+
+    /* Finalization.  */
+    clean_static_variables();
+}
+
+void
+test_checkpoint_of_loop_function(void)
+{
+    /* Initialization.  */
+    initialize_static_variables("loop_function.wasm");
+    WASMExecEnvCheckpoint *tmp_exec_env_checkp;
+
+    /* The function itself will issue the migration request.  */
+
+    /* Test 2.  */
+    wasm_application_execute_func(
+            (wasm_module_inst_t )module_inst,
+            NULL,
+            "loop_function", 0, args);
+    CU_ASSERT_EQUAL(exec_env->state, CHECKPOINTED);
+
+    /* Save a reference to the checkpoint.  */
+    tmp_exec_env_checkp = malloc(stack_size);
+    wasm_copy_checkpoint(tmp_exec_env_checkp, exec_env->exec_env_checkpoint, stack_size);
+
+    /* Copy the data section in linear memory.  */
+    WASMMemoryInstance *memory_inst = wasm_get_default_memory(module_inst);
+    uint64 memory_size  = memory_inst->memory_data_size;
+    uint8 *data_memory = memory_inst->memory_data;
+    uint8 *tmp_memory_data = malloc(memory_size);
+    memcpy(tmp_memory_data, data_memory, memory_size);
+
+    /* Free the WAMR runtime.  */
+    clean_static_variables();
+
+    /* Restart an execution from a checkpoint.  */
+    initialize_static_variables("loop_function.wasm");
+    exec_env_checkpoint = tmp_exec_env_checkp;
+    CU_ASSERT_PTR_NOT_NULL(exec_env_checkpoint);
+
+    /* Add a reference to tmp_memory_data.  */
+    exec_env_checkpoint->memory_data = tmp_memory_data;
+    exec_env_checkpoint->memory_data_size = memory_size;
+
+    wasm_application_execute_func(
+            (wasm_module_inst_t )module_inst,
+            exec_env_checkpoint,
+            "loop_function", 0, args);
+    CU_ASSERT_EQUAL(exec_env->state, OPERATIONAL);
+
+    /* Finalization.  */
+    clean_static_variables();
+}
+
+void
+test_checkpoint_of_async_function(void)
+{
+    /* Initialization.  */
+    initialize_static_variables("async_checkpoint.wasm");
     WASMExecEnvCheckpoint *tmp_exec_env_checkp;
 
     /* Simulate an incoming migration request.  */
@@ -202,37 +326,93 @@ test_checkpoint_of_loaded_function(void)
     wasm_application_execute_func(
             (wasm_module_inst_t )module_inst,
             NULL,
-            "start_counting", 0, args);
+            "counter", 0, args);
     CU_ASSERT_EQUAL(exec_env->state, CHECKPOINTED);
 
     /* Save a reference to the checkpoint.  */
     tmp_exec_env_checkp = malloc(stack_size);
     wasm_copy_checkpoint(tmp_exec_env_checkp, exec_env->exec_env_checkpoint, stack_size);
 
+    /* Copy the data section in linear memory.  */
+    WASMMemoryInstance *memory_inst = wasm_get_default_memory(module_inst);
+    uint64 memory_size  = memory_inst->memory_data_size;
+    uint8 *data_memory = memory_inst->memory_data;
+    uint8 *tmp_memory_data = malloc(memory_size);
+    memcpy(tmp_memory_data, data_memory, memory_size);
+
     /* Free the WAMR runtime.  */
     clean_static_variables();
 
     /* Restart an execution from a checkpoint.  */
-    initialize_static_variables("counter.wasm");
+    initialize_static_variables("async_checkpoint.wasm");
     exec_env_checkpoint = tmp_exec_env_checkp;
     CU_ASSERT_PTR_NOT_NULL(exec_env_checkpoint);
 
+    /* Add a reference to tmp_memory_data.  */
+    exec_env_checkpoint->memory_data = tmp_memory_data;
+    exec_env_checkpoint->memory_data_size = memory_size;
+
+    printf("RESUMING \n");
     wasm_application_execute_func(
             (wasm_module_inst_t )module_inst,
             exec_env_checkpoint,
-            "start_counting", 0, args);
+            "counter", 0, args);
     CU_ASSERT_EQUAL(exec_env->state, OPERATIONAL);
 
+    /* Finalization.  */
+    clean_static_variables();
+}
 
-    /*
-    exec_env->state = RESTORING;
-    CU_ASSERT_EQUAL(exec_env->state, RESTORING);
+void
+test_checkpoint_of_multi_modules_function(void)
+{
+    /* Initialization.  */
+    initialize_static_variables("mB.wasm");
+    WASMExecEnvCheckpoint *tmp_exec_env_checkp;
 
+    /* Simulate an incoming migration request.  */
+    pthread_t thread_id;
+    pthread_create(&thread_id, NULL,
+                   issue_migration_request,
+                   (void *)0);
+
+    /* Test 2.  */
+    wasm_application_execute_func(
+            (wasm_module_inst_t )module_inst,
+            NULL,
+            "B1", 0, args);
+    CU_ASSERT_EQUAL(exec_env->state, CHECKPOINTED);
+
+    /* Save a reference to the checkpoint.  */
+    tmp_exec_env_checkp = malloc(stack_size);
+    wasm_copy_checkpoint(tmp_exec_env_checkp, exec_env->exec_env_checkpoint, stack_size);
+
+    /* Copy the data section in linear memory.  */
+    WASMMemoryInstance *memory_inst = wasm_get_default_memory(module_inst);
+    uint64 memory_size  = memory_inst->memory_data_size;
+    uint8 *data_memory = memory_inst->memory_data;
+    uint8 *tmp_memory_data = malloc(memory_size);
+    memcpy(tmp_memory_data, data_memory, memory_size);
+
+    /* Free the WAMR runtime.  */
+    clean_static_variables();
+
+    /* Restart an execution from a checkpoint.  */
+    initialize_static_variables("mB.wasm");
+    exec_env_checkpoint = tmp_exec_env_checkp;
+    CU_ASSERT_PTR_NOT_NULL(exec_env_checkpoint);
+
+    /* Add a reference to tmp_memory_data.  */
+    exec_env_checkpoint->memory_data = tmp_memory_data;
+    exec_env_checkpoint->memory_data_size = memory_size;
+
+    printf("RESUMING \n");
     wasm_application_execute_func(
             (wasm_module_inst_t )module_inst,
             exec_env_checkpoint,
-            "start_counting", 0, args); */
+            "B1", 0, args);
+    CU_ASSERT_EQUAL(exec_env->state, OPERATIONAL);
 
     /* Finalization.  */
-    // clean_static_variables();
+    clean_static_variables();
 }

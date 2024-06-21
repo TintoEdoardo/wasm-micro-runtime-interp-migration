@@ -21,8 +21,13 @@ int main()
     }
 
     /* Add the tests to the suite.  */
-    if ((NULL == CU_add_test(pSuite, "Test wasm_runtime_request_checkpoint()", test_wasm_runtime_request_checkpoint)) ||
-        (NULL == CU_add_test(pSuite, "Test checkpoint of loaded function", test_checkpoint_of_loaded_function)))
+    if (
+        (NULL == CU_add_test(pSuite, "Test wasm_runtime_request_checkpoint", test_wasm_runtime_request_checkpoint)) ||
+        (NULL == CU_add_test(pSuite, "Test checkpoint of a simple function", test_checkpoint_of_simple_function)) ||
+        (NULL == CU_add_test(pSuite, "Test checkpoint of a loop function", test_checkpoint_of_loop_function)) ||
+        (NULL == CU_add_test(pSuite, "Test checkpoint of an async function", test_checkpoint_of_async_function)) ||
+        (NULL == CU_add_test(pSuite, "Test checkpoint of a multi-modules function", test_checkpoint_of_multi_modules_function))
+        )
     {
         CU_cleanup_registry();
         return CU_get_error();

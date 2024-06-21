@@ -6763,18 +6763,6 @@ wasm_loader_unload(WASMModule *module)
     wasm_runtime_free(module);
 }
 
-/* TODO: REMOVE
-bool
-wasm_loader_load_stack(WASMExecEnv *exec_env, uint8 *buf, uint32 size,
-#if WASM_ENABLE_MULTI_MODULE != 0
-                            bool main_module,
-#endif
-                            const LoadArgs *args, char *error_buf, uint32 error_buf_size)
-{
-
-}
- */
-
 bool
 wasm_loader_find_block_addr(WASMExecEnv *exec_env, BlockAddr *block_addr_cache,
                             const uint8 *start_addr, const uint8 *code_end_addr,
@@ -6800,7 +6788,6 @@ wasm_loader_find_block_addr(WASMExecEnv *exec_env, BlockAddr *block_addr_cache,
             return true;
         }
     }
-
     /* Cache unhit */
     block_stack[0].start_addr = start_addr;
 
@@ -7610,6 +7597,7 @@ wasm_loader_find_block_addr(WASMExecEnv *exec_env, BlockAddr *block_addr_cache,
         }
     }
 
+    printf("End - Inside wasm_loader_find_block_addr\n");
     (void)u8;
     (void)exec_env;
     return false;

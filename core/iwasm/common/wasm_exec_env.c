@@ -237,32 +237,6 @@ wasm_exec_env_destroy(WASMExecEnv *exec_env)
 }
 
 #if WASM_ENABLE_MIGRATING_INTERP != 0
-/* TODO: REMOVE
-WASMExecEnvCheckpoint *
-wasm_exec_env_checkpoint_create(WASMExecEnv *exec_env,
-                                uint32 stack_size)
-{
-    / * Check that no native call are stacked.  * /
-    assert(exec_env->native_call_in_stack > 0);
-
-    WASMExecEnvCheckpoint *exec_enc_checkpoint;
-    uint64 total_size = sizeof(WASMExecEnvCheckpoint) + (uint64)stack_size;
-
-    if (total_size >= UINT32_MAX
-        || !(exec_enc_checkpoint = wasm_runtime_malloc((uint32)total_size)))
-        return NULL;
-
-    memset(exec_enc_checkpoint, 0, (uint32)total_size);
-
-    exec_enc_checkpoint->size = stack_size;
-    exec_enc_checkpoint->bottom =
-        (uint8 *)exec_enc_checkpoint + sizeof(WASMExecEnvCheckpoint);
-    exec_enc_checkpoint->top = exec_enc_checkpoint->bottom;
-
-    return exec_enc_checkpoint;
-}
-*/
-
 void
 wasm_exec_env_restore(WASMExecEnv *exec_env,
                       WASMExecEnvCheckpoint *exec_env_checkpoint)
@@ -274,15 +248,6 @@ wasm_exec_env_restore(WASMExecEnv *exec_env,
 #endif
     /* TODO: AOT is not supported yet.  */
 }
-
-/* TODO: REMOVE
-void
-wasm_exec_env_checkpoint_destroy(WASMExecEnvCheckpoint *exec_env_checkpoint)
-{
-    / * The internal src frame should be already destroyed.  * /
-    wasm_runtime_free(exec_env_checkpoint);
-}
- */
 #endif
 
 WASMModuleInstanceCommon *

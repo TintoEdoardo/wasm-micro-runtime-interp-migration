@@ -30,6 +30,14 @@ typedef struct WASMInterpFrame {
     /* Instruction pointer of the bytecode array.  */
     uint8 *ip;
 
+#if WASM_ENABLE_MIGRATING_INTERP != 0
+    /* Store the instruction pointer in the presence of a call
+     * to an import function. The idea is to preserve the ip for
+     * resuming in case a migration happens within the invoked
+     * (inner) function. */
+    uint8 *ip_before_import_call;
+#endif
+
 #if WASM_ENABLE_FAST_JIT != 0
     uint8 *jitted_return_addr;
 #endif
@@ -83,9 +91,6 @@ typedef struct WASMInterpFrame {
 typedef struct WASMInterpFrameCheckpoint {
     struct WASMInterpFrameCheckpoint *next_frame;
 
-    /* TODO: REMOVE
-    char *module_name;
-     */
     uint32 func_index;
     uint32  size;
 
@@ -94,6 +99,8 @@ typedef struct WASMInterpFrameCheckpoint {
      *  lp: parameters and local variables
      *  ip_offset: instruction pointer (as offset)
      *  sp_offset: operand stack top pointer (as offset)
+     *  sp_bottom: base of the checkpointed operand stack
+     *  sp_boundary: top of the checkpointed operand stack
      *  csp_bottom: base of the checkpointed csp stack
      *  csp_boundary: top of the checkpointed csp stack
      *  csp_offset: wasm label stack pointer (as offset)
@@ -101,6 +108,8 @@ typedef struct WASMInterpFrameCheckpoint {
 
     uint32 *lp;
     uint32 ip_offset;
+    uint32 *sp_bottom;
+    uint32 *sp_boundary;
     uint32 sp_offset;
     WASMBranchBlockCheckpoint *csp_bottom;
     WASMBranchBlockCheckpoint *csp_boundary;
@@ -139,20 +148,6 @@ wasm_interp_call_wasm(struct WASMModuleInstance *module_inst,
                       struct WASMExecEnv *exec_env,
                       struct WASMFunctionInstance *function, uint32 argc,
                       uint32 argv[]);
-
-/* TODO: REMOVE
-struct WASMExecEnvCheckpoint *
-wasm_interp_produce_checkpoint(struct WASMExecEnv *exec_env);
-
-void
-wasm_interp_restore_exec_env(struct WASMModuleInstance *module_inst,
-                             struct WASMExecEnv *exec_env,
-                             struct WASMExecEnvCheckpoint *exec_env_checkpoint);
-
-void
-wasm_interp_resume_wasm(struct WASMModuleInstance *module_inst,
-                        uint32 argv[]);
-*/
 
 #if WASM_ENABLE_MIGRATING_INTERP != 0
 void
